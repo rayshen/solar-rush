@@ -5,6 +5,8 @@ import { bodies, bodyMap, planetEphemerisElements } from './solarData.js';
 
 const DAY_MS = 86_400_000;
 const J2000_MS = Date.UTC(2000, 0, 1, 12);
+const SYSTEM_TRAVEL_Z = 1;
+const BACKGROUND_TRAVEL_Z = -SYSTEM_TRAVEL_Z;
 const START_DATE = new Date();
 const simulationSpeeds = [
   { label: '1.00x', secondsPerSecond: 1 },
@@ -175,7 +177,9 @@ function setPlanetScenePosition(id, date, sceneSemiMajorAxis, out, orbitEccentri
   const eclipticZ = sinPerihelion * sinInclination * orbitalX
     + cosPerihelion * sinInclination * orbitalY;
   const sceneScale = sceneSemiMajorAxis / elements.a;
-  return out.set(eclipticX * sceneScale, eclipticZ * sceneScale, eclipticY * sceneScale);
+  // Map the JPL ecliptic frame into Three.js without mirroring its handedness:
+  // ecliptic +X -> scene +X, +Y -> scene -Z, +Z -> scene +Y.
+  return out.set(eclipticX * sceneScale, eclipticZ * sceneScale, -eclipticY * sceneScale);
 }
 
 function createPlanetOrbitLine(body, date, color, opacity = 0.28) {
@@ -368,7 +372,7 @@ function getRushingTrailPoint(body, currentPosition, sunPosition, progress, mode
   out.set(
     sunPosition.x + Math.cos(angle) * coilRadius,
     sunPosition.y + Math.sin(angle) * coilRadius,
-    currentPosition.z - tail * depth + Math.sin(angle) * radius * pinch,
+    currentPosition.z - SYSTEM_TRAVEL_Z * tail * depth + Math.sin(angle) * radius * pinch,
   );
   return out;
 }
@@ -1101,7 +1105,7 @@ function buildSolarScene(mount, options) {
   const followSunVector = new THREE.Vector3();
   const followSideVector = new THREE.Vector3();
   const backgroundOffset = new THREE.Vector3();
-  const backgroundTravelDirection = new THREE.Vector3(0, 0, -1);
+  const backgroundTravelDirection = new THREE.Vector3(0, 0, BACKGROUND_TRAVEL_Z);
   let simDays = 0;
   let elapsedSeconds = 0;
   let visualTime = 0;
@@ -1126,7 +1130,7 @@ function buildSolarScene(mount, options) {
       const pointIndex = index * 3;
       sunMotionLine.positions[pointIndex] = sunPosition.x;
       sunMotionLine.positions[pointIndex + 1] = sunPosition.y;
-      sunMotionLine.positions[pointIndex + 2] = sunPosition.z - distance;
+      sunMotionLine.positions[pointIndex + 2] = sunPosition.z - SYSTEM_TRAVEL_Z * distance;
     }
     sunMotionLine.geometry.attributes.position.needsUpdate = true;
   };
@@ -1188,7 +1192,7 @@ function buildSolarScene(mount, options) {
     const rushingMode = state.viewMode === 'helical' || state.viewMode === 'follow';
     const targetRootTilt = rushingMode ? Math.PI / 2 : 0;
     systemRoot.rotation.x = THREE.MathUtils.lerp(systemRoot.rotation.x, targetRootTilt, 1 - Math.pow(0.001, delta));
-    systemRoot.position.set(0, rushingMode ? 0 : Math.sin(simDays * 0.25) * 0.08, -forward);
+    systemRoot.position.set(0, rushingMode ? 0 : Math.sin(simDays * 0.25) * 0.08, forward * SYSTEM_TRAVEL_Z);
     for (const [id, node] of bodyNodes) {
       const orbitDays = node.body.orbitDays || 1;
       const direction = orbitDays < 0 ? -1 : 1;
