@@ -199,7 +199,7 @@ p {
 
 .transport-controls {
   display: grid;
-  grid-template-columns: repeat(5, 40px);
+  grid-template-columns: repeat(2, 40px);
   height: 36px;
   overflow: hidden;
   border: 1px solid rgba(121, 171, 229, 0.2);
@@ -529,7 +529,7 @@ p {
 }
 
 .selected-heading {
-  padding: 12px 0 10px;
+  padding: 12px 0;
   border-bottom: 1px solid rgba(143, 164, 196, 0.16);
 }
 
@@ -551,7 +551,7 @@ p {
   margin-top: 9px;
   color: #9db1cf;
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.55;
 }
 
 .stat-list {
@@ -579,10 +579,14 @@ p {
   text-align: right;
 }
 
-.mode-block {
+.follow-control {
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid rgba(143, 164, 196, 0.16);
+}
+
+.additional-stat-list {
+  margin-top: 4px;
 }
 
 .additional-data {
@@ -684,9 +688,9 @@ p {
   left: 14px;
   height: 84px;
   display: grid;
-  grid-template-columns: auto minmax(420px, 1fr) auto;
+  grid-template-columns: minmax(520px, 1fr) auto;
   align-items: center;
-  gap: 24px;
+  gap: 28px;
   padding: 0 16px;
 }
 

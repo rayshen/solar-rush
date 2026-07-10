@@ -28,6 +28,12 @@ const viewModeLabels = {
   follow: 'Follow',
 };
 
+const viewModeDescriptions = {
+  orbit: '俯视完整轨道结构，适合比较行星位置与系统尺度。',
+  helical: '太阳系向右推进，左侧光迹记录各天体经过的空间路径。',
+  follow: '跟随选中天体，仅突出它的主轨迹与局部系统。',
+};
+
 const trailBodyIds = ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune'];
 const trailColors = {
   mercury: '#d9d2c8',
@@ -49,6 +55,12 @@ function formatFixed(value, digits = 2) {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
+}
+
+function formatDistance(value) {
+  if (value >= 1_000_000_000) return `${formatFixed(value / 1_000_000_000, 2)}B km`;
+  if (value >= 1_000_000) return `${formatFixed(value / 1_000_000, 1)}M km`;
+  return formatNumber(value, ' km');
 }
 
 function formatLunarDate(date) {
@@ -262,7 +274,7 @@ function createHelicalTrail(color, pointCount = 300, opacity = 0.74, glowTexture
   const baseColor = new THREE.Color(color);
   for (let index = 0; index < pointCount; index += 1) {
     const progress = index / (pointCount - 1);
-    const intensity = 0.012 + Math.pow(progress, 2.45) * 1.85;
+    const intensity = 0.008 + Math.pow(progress, 2.7) * 1.06;
     colors[index * 3] = baseColor.r * intensity;
     colors[index * 3 + 1] = baseColor.g * intensity;
     colors[index * 3 + 2] = baseColor.b * intensity;
@@ -284,10 +296,10 @@ function createHelicalTrail(color, pointCount = 300, opacity = 0.74, glowTexture
   const glowMaterial = new THREE.PointsMaterial({
     map: glowTexture,
     vertexColors: true,
-    size: 0.3,
+    size: 0.24,
     sizeAttenuation: true,
     transparent: true,
-    opacity: opacity * 0.56,
+    opacity: opacity * 0.46,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
@@ -301,10 +313,10 @@ function createHelicalTrail(color, pointCount = 300, opacity = 0.74, glowTexture
   const outerGlowMaterial = new THREE.PointsMaterial({
     map: glowTexture,
     vertexColors: true,
-    size: 0.82,
+    size: 0.66,
     sizeAttenuation: true,
     transparent: true,
-    opacity: opacity * 0.24,
+    opacity: opacity * 0.18,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
@@ -330,8 +342,8 @@ function createHelicalTrail(color, pointCount = 300, opacity = 0.74, glowTexture
   };
 }
 
-function createSunMotionLine() {
-  const pointCount = 72;
+function createSunMotionLine(glowTexture) {
+  const pointCount = 1600;
   const positions = new Float32Array(pointCount * 3);
   const colors = new Float32Array(pointCount * 3);
   const geometry = new THREE.BufferGeometry();
@@ -348,26 +360,67 @@ function createSunMotionLine() {
   const material = new THREE.LineBasicMaterial({
     vertexColors: true,
     transparent: true,
-    opacity: 0.96,
+    opacity: 0.62,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
   const line = new THREE.Line(geometry, material);
   line.frustumCulled = false;
-  return { line, positions, colors, geometry, material, pointCount };
+
+  const glowMaterial = new THREE.PointsMaterial({
+    map: glowTexture,
+    vertexColors: true,
+    size: 0.34,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.7,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const glow = new THREE.Points(geometry, glowMaterial);
+  glow.frustumCulled = false;
+
+  const outerGlowMaterial = new THREE.PointsMaterial({
+    map: glowTexture,
+    vertexColors: true,
+    size: 0.82,
+    sizeAttenuation: true,
+    transparent: true,
+    opacity: 0.24,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const outerGlow = new THREE.Points(geometry, outerGlowMaterial);
+  outerGlow.frustumCulled = false;
+
+  const group = new THREE.Group();
+  group.add(outerGlow, glow, line);
+  return {
+    group,
+    line,
+    glow,
+    outerGlow,
+    positions,
+    colors,
+    geometry,
+    material,
+    glowMaterial,
+    outerGlowMaterial,
+    pointCount,
+  };
 }
 
 function getRushingTrailPoint(body, currentPosition, sunPosition, progress, mode, out) {
   const tail = 1 - progress;
   const currentAngle = Math.atan2(currentPosition.y - sunPosition.y, currentPosition.x - sunPosition.x);
-  const turns = THREE.MathUtils.clamp(3.15 - body.orbitRadius * 0.075, 1.15, 3.05);
+  const turns = THREE.MathUtils.clamp(2.7 - body.orbitRadius * 0.055, 1.2, 2.65);
   const angle = currentAngle - tail * turns * Math.PI * 2;
-  const depth = mode === 'follow' ? 42 : 62;
+  const depth = mode === 'follow' ? 32 : 52;
   const currentRadius = Math.hypot(currentPosition.x - sunPosition.x, currentPosition.y - sunPosition.y);
   const radius = Math.max(currentRadius, body.orbitRadius * 0.8);
   const pinch = Math.pow(tail, 0.82);
   const curl = Math.sin(tail * Math.PI) * 0.52 + 0.48;
-  const coilRadius = currentRadius + radius * pinch * curl * 0.28;
+  const coilRadius = currentRadius + radius * pinch * curl * 0.18;
 
   out.set(
     sunPosition.x + Math.cos(angle) * coilRadius,
@@ -399,10 +452,10 @@ function createStarField(starTexture) {
     geometry,
     new THREE.PointsMaterial({
       map: starTexture,
-      size: 0.16,
+      size: 0.17,
       vertexColors: true,
       transparent: true,
-      opacity: 1,
+      opacity: 0.96,
       depthWrite: false,
       alphaTest: 0.02,
     }),
@@ -413,7 +466,7 @@ function createMilkyWayBand(starTexture) {
   const geometry = new THREE.BufferGeometry();
   const positions = [];
   const colors = [];
-  for (let i = 0; i < 12000; i += 1) {
+  for (let i = 0; i < 8500; i += 1) {
     const x = THREE.MathUtils.randFloatSpread(180);
     const y = THREE.MathUtils.randFloatSpread(8) + Math.sin(x * 0.035) * 4;
     const z = THREE.MathUtils.randFloat(-150, -55) + Math.cos(x * 0.018) * 14;
@@ -425,10 +478,10 @@ function createMilkyWayBand(starTexture) {
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   const material = new THREE.PointsMaterial({
     map: starTexture,
-    size: 0.19,
+    size: 0.14,
     vertexColors: true,
     transparent: true,
-    opacity: 0.58,
+    opacity: 0.4,
     depthWrite: false,
     alphaTest: 0.02,
   });
@@ -933,8 +986,8 @@ function buildSolarScene(mount, options) {
   scene.fog = new THREE.FogExp2('#03060d', 0.008);
 
   const camera = new THREE.PerspectiveCamera(54, mount.clientWidth / mount.clientHeight, 0.05, 800);
-  if (options.getState().viewMode === 'helical') camera.position.set(-15.5, 11.3, 31.5);
-  else camera.position.set(0, 28, 46);
+  if (options.getState().viewMode === 'helical') camera.position.set(-20, 14, 43);
+  else camera.position.set(0, 42, 38);
 
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
@@ -955,7 +1008,7 @@ function buildSolarScene(mount, options) {
   controls.maxDistance = 130;
   controls.panSpeed = 0.72;
   controls.rotateSpeed = 0.66;
-  if (options.getState().viewMode === 'helical') controls.target.set(0, 0, -7);
+  if (options.getState().viewMode === 'helical') controls.target.set(0, 0, -11);
 
   const ambient = new THREE.AmbientLight('#6d88b7', 0.22);
   scene.add(ambient);
@@ -974,9 +1027,9 @@ function buildSolarScene(mount, options) {
   scene.add(systemRoot);
   const helicalTrailGroup = new THREE.Group();
   scene.add(helicalTrailGroup);
-  const sunMotionLine = createSunMotionLine();
-  scene.add(sunMotionLine.line);
   const trailGlowTexture = createGlowTexture();
+  const sunMotionLine = createSunMotionLine(trailGlowTexture);
+  scene.add(sunMotionLine.group);
 
   const bodyNodes = new Map();
   const orbitPivots = new Map();
@@ -1012,7 +1065,13 @@ function buildSolarScene(mount, options) {
         : createOrbitLine(body.orbitRadius, body.eccentricity, '#6f7e99', 0.22);
       if (body.type === 'moon') orbit.rotation.x = THREE.MathUtils.degToRad(body.inclination);
       parentGroup.add(orbit);
-      orbitLines.push({ orbit, type: body.type, defaultOpacity: body.type === 'moon' ? 0.22 : 0.28 });
+      orbitLines.push({
+        id: body.id,
+        parent: body.parent,
+        orbit,
+        type: body.type,
+        defaultOpacity: body.type === 'moon' ? 0.22 : 0.28,
+      });
     }
 
     const group = new THREE.Group();
@@ -1099,6 +1158,7 @@ function buildSolarScene(mount, options) {
   const targetPosition = new THREE.Vector3();
   const cameraGoal = new THREE.Vector3();
   const lookAtGoal = new THREE.Vector3();
+  const cameraFocusPosition = new THREE.Vector3();
   const currentLook = new THREE.Vector3();
   const previousTarget = new THREE.Vector3();
   const targetDelta = new THREE.Vector3();
@@ -1116,14 +1176,18 @@ function buildSolarScene(mount, options) {
   let lastCameraRevision = -1;
   const trailPoint = new THREE.Vector3();
 
-  const updateSunMotionLine = (mode) => {
+  const updateSunMotionLine = (mode, selectedId) => {
     const sunPosition = worldPositions.get('sun') ?? targetPosition;
     const visible = mode === 'helical' || mode === 'follow';
-    sunMotionLine.line.visible = visible;
+    sunMotionLine.group.visible = visible;
     if (!visible) return;
 
     const nearTail = sunBody.scaleRadius * 1.18;
-    const farTail = mode === 'follow' ? 86 : 132;
+    const farTail = mode === 'follow' ? 56 : 88;
+    const highlighted = selectedId === 'sun';
+    sunMotionLine.material.opacity = highlighted ? 0.96 : 0.42;
+    sunMotionLine.glowMaterial.opacity = highlighted ? 0.7 : 0.16;
+    sunMotionLine.outerGlowMaterial.opacity = highlighted ? 0.24 : 0.04;
     for (let index = 0; index < sunMotionLine.pointCount; index += 1) {
       const progress = index / (sunMotionLine.pointCount - 1);
       const distance = nearTail + progress * farTail;
@@ -1138,29 +1202,41 @@ function buildSolarScene(mount, options) {
   const updateHelicalTrails = (mode, selectedId) => {
     const trailsVisible = mode === 'helical' || mode === 'follow';
     helicalTrailGroup.visible = trailsVisible;
-    for (const item of orbitLines) {
-      item.orbit.material.opacity = mode === 'orbit' ? item.defaultOpacity : item.defaultOpacity * 0.18;
-    }
-    if (!trailsVisible) return;
-
     const selectedBody = bodyMap[selectedId] ?? bodyMap.sun;
     const selectedTrailId = selectedBody.type === 'planet'
       ? selectedBody.id
       : selectedBody.parent && bodyMap[selectedBody.parent]?.type === 'planet'
         ? selectedBody.parent
-        : 'jupiter';
+        : null;
+    for (const item of orbitLines) {
+      const selectedOrbit = item.id === selectedTrailId;
+      const selectedMoonSystem = item.type === 'moon' && item.parent === selectedBody.id;
+      if (mode === 'orbit') {
+        item.orbit.material.opacity = selectedOrbit
+          ? 0.48
+          : selectedMoonSystem
+            ? 0.3
+            : item.type === 'planet'
+              ? selectedTrailId ? 0.2 : 0.28
+              : 0.1;
+      } else {
+        item.orbit.material.opacity = selectedOrbit ? 0.12 : item.defaultOpacity * 0.08;
+      }
+    }
+    if (!trailsVisible) return;
+
     const sunPosition = worldPositions.get('sun') ?? targetPosition;
 
     for (const [id, trail] of trailNodes) {
       const body = bodyMap[id];
       const selectedTrail = id === selectedTrailId;
-      const baseOpacity = selectedTrail ? 1 : mode === 'follow' ? 0.78 : 0.9;
+      const baseOpacity = selectedTrail ? 0.98 : mode === 'follow' ? 0.09 : selectedTrailId ? 0.36 : 0.42;
       trail.group.visible = true;
       trail.material.opacity = baseOpacity;
-      trail.glowMaterial.opacity = baseOpacity * 0.6;
-      trail.outerGlowMaterial.opacity = baseOpacity * 0.28;
-      trail.glowMaterial.size = selectedTrail ? 0.38 : 0.3;
-      trail.outerGlowMaterial.size = selectedTrail ? 1 : 0.82;
+      trail.glowMaterial.opacity = baseOpacity * (selectedTrail ? 0.54 : 0.32);
+      trail.outerGlowMaterial.opacity = baseOpacity * (selectedTrail ? 0.2 : 0.1);
+      trail.glowMaterial.size = selectedTrail ? 0.32 : 0.2;
+      trail.outerGlowMaterial.size = selectedTrail ? 0.78 : 0.54;
 
       const currentPosition = worldPositions.get(id) ?? targetPosition;
       for (let index = 0; index < trail.pointCount; index += 1) {
@@ -1215,18 +1291,23 @@ function buildSolarScene(mount, options) {
       node.label.material.opacity = id === state.selectedId
         ? 0.96
         : moonInSelectedSystem
-          ? 0.28
+          ? 0.34
           : node.body.type === 'moon'
-            ? 0.08
-            : 0.7;
+            ? 0.06
+            : state.viewMode === 'follow'
+              ? 0.18
+              : state.viewMode === 'helical'
+                ? 0.5
+                : 0.72;
       node.group.getWorldPosition(worldPositions.get(id));
     }
-    updateSunMotionLine(state.viewMode);
+    updateSunMotionLine(state.viewMode, state.selectedId);
     updateHelicalTrails(state.viewMode, state.selectedId);
 
     sunLight.position.copy(worldPositions.get('sun'));
     const selected = bodyNodes.get(state.selectedId) ?? bodyNodes.get('sun');
     selected.group.getWorldPosition(targetPosition);
+    cameraFocusPosition.copy(state.viewMode === 'orbit' ? worldPositions.get('sun') : targetPosition);
 
     const selectedBody = selected.body;
     const distance = selectedBody.type === 'star'
@@ -1237,12 +1318,12 @@ function buildSolarScene(mount, options) {
     let cameraBias;
     if (state.viewMode === 'orbit') {
       cameraBias = selectedBody.type === 'star'
-        ? new THREE.Vector3(0, 28, 46)
+        ? new THREE.Vector3(0, 42, 38)
         : new THREE.Vector3(distance * 1.25, distance * 0.72, distance * 1.35);
     } else if (state.viewMode === 'helical') {
       cameraBias = selectedBody.type === 'star'
-        ? new THREE.Vector3(-15.5, 11.3, 31.5)
-        : new THREE.Vector3(-distance * 0.78, distance * 0.36, distance * 0.72);
+        ? new THREE.Vector3(-20, 14, 43)
+        : new THREE.Vector3(-distance * 0.96, distance * 0.44, distance * 0.92);
     } else {
       cameraBias = selectedBody.type === 'star'
         ? new THREE.Vector3(-8, 6.5, 15)
@@ -1257,10 +1338,10 @@ function buildSolarScene(mount, options) {
         .addScaledVector(followSideVector, selectedBody.scaleRadius * 2.4 + 3.2);
       cameraGoal.y += selectedBody.scaleRadius * 1.8 + 2.2;
     } else {
-      cameraGoal.copy(targetPosition).add(cameraBias);
+      cameraGoal.copy(cameraFocusPosition).add(cameraBias);
     }
-    lookAtGoal.copy(targetPosition);
-    if (state.viewMode === 'helical') lookAtGoal.z -= selectedBody.type === 'star' ? 7 : 4.8;
+    lookAtGoal.copy(cameraFocusPosition);
+    if (state.viewMode === 'helical') lookAtGoal.z -= selectedBody.type === 'star' ? 11 : 6.5;
     if (state.viewMode === 'follow' && selectedBody.type === 'star') lookAtGoal.z -= 3;
 
     const cameraTargetChanged = state.selectedId !== lastSelectedId
@@ -1271,7 +1352,7 @@ function buildSolarScene(mount, options) {
       lastSelectedId = state.selectedId;
       lastViewMode = state.viewMode;
       lastCameraRevision = state.cameraRevision;
-      previousTarget.copy(targetPosition);
+      previousTarget.copy(cameraFocusPosition);
     }
 
     if (state.autoFollow) {
@@ -1281,11 +1362,11 @@ function buildSolarScene(mount, options) {
         controls.target.copy(currentLook);
         cameraTransition -= delta * 1.65;
       } else {
-        targetDelta.copy(targetPosition).sub(previousTarget);
+        targetDelta.copy(cameraFocusPosition).sub(previousTarget);
         camera.position.add(targetDelta);
         controls.target.add(targetDelta);
       }
-      previousTarget.copy(targetPosition);
+      previousTarget.copy(cameraFocusPosition);
     }
 
     controls.update();
@@ -1351,7 +1432,7 @@ function BodyButton({ body, selectedId, onSelect, expanded = false, nested = fal
         <small>{body.zh}</small>
       </span>
       <em>
-        {expanded ? '⌄' : body.type === 'moon' ? parent?.name : body.type === 'star' ? 'center' : `${formatFixed(body.distanceKm / 1_000_000, 1)}M km`}
+        {expanded ? '⌄' : body.type === 'moon' ? parent?.name : body.type === 'star' ? 'center' : formatDistance(body.distanceKm)}
       </em>
     </button>
   );
@@ -1366,6 +1447,7 @@ function App() {
   const [playing, setPlaying] = useState(true);
   const [autoFollow, setAutoFollow] = useState(true);
   const [viewMode, setViewMode] = useState(DEFAULT_VIEW_MODE);
+  const [additionalDataOpen, setAdditionalDataOpen] = useState(false);
   const [cameraRevision, setCameraRevision] = useState(0);
   const [telemetry, setTelemetry] = useState({
     simDays: 0,
@@ -1480,20 +1562,11 @@ function App() {
           </div>
         </div>
         <div className="controls">
-          <button type="button" className={playing ? 'active' : ''} onClick={() => setPlaying((value) => !value)}>
-            {playing ? 'Pause' : 'Play'}
-          </button>
-          <button type="button" onClick={() => setCameraRevision((value) => value + 1)}>
-            Reset
-          </button>
           <div className="transport-controls" aria-label="time controls">
-            <button type="button">⏮</button>
-            <button type="button">◀</button>
-            <button type="button" className="active" onClick={() => setPlaying((value) => !value)}>
+            <button type="button" aria-label="Reset view" onClick={() => setCameraRevision((value) => value + 1)}>↺</button>
+            <button type="button" aria-label={playing ? 'Pause' : 'Play'} className={playing ? 'active' : ''} onClick={() => setPlaying((value) => !value)}>
               {playing ? 'Ⅱ' : '▶'}
             </button>
-            <button type="button">▶</button>
-            <button type="button">⟳</button>
           </div>
           <label>
             <span>Sim Speed</span>
@@ -1593,7 +1666,7 @@ function App() {
           <span>{selectedBody.type.toUpperCase()}</span>
           <h2>{selectedBody.name}</h2>
           <p>
-            默认以 7d/s 从倾斜的 3D 视角横向推进。切换目标后会归位一次，随后可自由旋转、缩放、平移。
+            {viewModeDescriptions[viewMode]}
           </p>
         </div>
 
@@ -1611,7 +1684,7 @@ function App() {
           </div>
           <div>
             <span>Distance to Parent</span>
-            <strong>{selectedBody.parent ? formatNumber(selectedBody.distanceKm, ' km') : '系统质心'}</strong>
+            <strong>{selectedBody.parent ? formatDistance(selectedBody.distanceKm) : '系统质心'}</strong>
           </div>
           <div>
             <span>Orbit Period</span>
@@ -1630,69 +1703,33 @@ function App() {
             <strong>{formatFixed(selectedBody.axialTilt, 2)}°</strong>
           </div>
           <div>
-            <span>Surface Gravity</span>
-            <strong>{selectedBody.gravity}</strong>
-          </div>
-          <div>
-            <span>Escape Velocity</span>
-            <strong>{estimateEscapeVelocity(selectedBody)}</strong>
-          </div>
-          <div>
-            <span>Mass</span>
-            <strong>{selectedBody.mass}</strong>
-          </div>
-          <div>
-            <span>Moons</span>
-            <strong>{selectedBody.moons.length}</strong>
-          </div>
-          <div>
-            <span>Visual Magnitude</span>
-            <strong>{selectedBody.type === 'star' ? '-26.74' : '—'}</strong>
-          </div>
-          <div>
-            <span>Right Ascension</span>
-            <strong>{pseudoSkyCoordinate(selectedBody, 'ra')}</strong>
-          </div>
-          <div>
-            <span>Declination</span>
-            <strong>{pseudoSkyCoordinate(selectedBody, 'dec')}</strong>
-          </div>
-          <div>
             <span>Observation Mode</span>
             <strong>{viewModeLabels[viewMode]}</strong>
           </div>
         </div>
 
-        <button type="button" className="additional-data">
+        <button
+          type="button"
+          className="additional-data"
+          aria-expanded={additionalDataOpen}
+          onClick={() => setAdditionalDataOpen((value) => !value)}
+        >
           <span>Additional Data</span>
-          <strong>⌄</strong>
+          <strong>{additionalDataOpen ? '⌃' : '⌄'}</strong>
         </button>
-
-        <div className="mode-block">
-          <span>Observation Mode</span>
-          <div className="segmented">
-            <button
-              type="button"
-              className={viewMode === 'orbit' ? 'active' : ''}
-              onClick={() => switchViewMode('orbit')}
-            >
-              Orbit View
-            </button>
-            <button
-              type="button"
-              className={viewMode === 'helical' ? 'active' : ''}
-              onClick={() => switchViewMode('helical')}
-            >
-              3D Spiral
-            </button>
-            <button
-              type="button"
-              className={viewMode === 'follow' ? 'active' : ''}
-              onClick={() => switchViewMode('follow')}
-            >
-              Follow
-            </button>
+        {additionalDataOpen && (
+          <div className="stat-list additional-stat-list">
+            <div><span>Surface Gravity</span><strong>{selectedBody.gravity}</strong></div>
+            <div><span>Escape Velocity</span><strong>{estimateEscapeVelocity(selectedBody)}</strong></div>
+            <div><span>Mass</span><strong>{selectedBody.mass}</strong></div>
+            <div><span>Moons</span><strong>{selectedBody.moons.length}</strong></div>
+            <div><span>Visual Magnitude</span><strong>{selectedBody.type === 'star' ? '-26.74' : '—'}</strong></div>
+            <div><span>Right Ascension</span><strong>{pseudoSkyCoordinate(selectedBody, 'ra')}</strong></div>
+            <div><span>Declination</span><strong>{pseudoSkyCoordinate(selectedBody, 'dec')}</strong></div>
           </div>
+        )}
+
+        <div className="follow-control">
           <label className="toggle-row">
             <input type="checkbox" checked={autoFollow} onChange={(event) => setAutoFollow(event.target.checked)} />
             <span>Keep selected body centered</span>
@@ -1717,10 +1754,6 @@ function App() {
       </div>
 
       <footer className="bottom-bar">
-        <div className="timeline-actions">
-          <button type="button">↺</button>
-          <button type="button">▶</button>
-        </div>
         <div className="timeline">
           <span>Elapsed {formatElapsed(telemetry.elapsedSeconds)}</span>
           <div className="track">
