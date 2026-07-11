@@ -36,6 +36,10 @@ button {
   cursor: pointer;
 }
 
+.mobile-menu-toggle {
+  display: none;
+}
+
 .app-shell {
   position: relative;
   width: 100vw;
@@ -489,7 +493,20 @@ p {
 }
 
 .detail-tabs button:nth-child(4)::before {
-  content: "◌";
+  display: none;
+  content: "";
+}
+
+.tab-atmosphere-icon {
+  display: block;
+  width: 19px;
+  height: 19px;
+  margin: 0 auto 3px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .detail-tabs button.active {
@@ -533,6 +550,16 @@ p {
   border-radius: 50%;
   color: #7df8ff;
   font-size: 22px;
+}
+
+.detail-icon svg {
+  width: 21px;
+  height: 21px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .atmosphere-icon {
@@ -972,7 +999,7 @@ kbd {
   .app-shell {
     display: flex;
     width: 100%;
-    height: auto;
+    height: 100dvh;
     min-height: 100dvh;
     flex-direction: column;
     gap: 10px;
@@ -980,7 +1007,9 @@ kbd {
       max(10px, env(safe-area-inset-top))
       10px
       max(12px, env(safe-area-inset-bottom));
-    overflow: visible;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .space-stage {
@@ -1012,6 +1041,95 @@ kbd {
     padding: 10px;
     border: 1px solid rgba(139, 178, 230, 0.18);
     border-radius: 10px;
+  }
+
+  .mobile-menu-toggle {
+    display: inline-flex;
+    height: 38px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 0 12px;
+    border: 1px solid rgba(125, 248, 255, 0.36);
+    border-radius: 8px;
+    background: rgba(16, 29, 49, 0.82);
+    color: #e8f5ff;
+    font-size: 12px;
+  }
+
+  .mobile-menu-toggle span {
+    font-size: 17px;
+    line-height: 1;
+  }
+
+  .app-shell:not(.mobile-menu-open) .top-bar .time-strip,
+  .app-shell:not(.mobile-menu-open) .top-bar .controls,
+  .app-shell:not(.mobile-menu-open) .left-panel,
+  .app-shell:not(.mobile-menu-open) .right-panel,
+  .app-shell:not(.mobile-menu-open) .center-time-chip,
+  .app-shell:not(.mobile-menu-open) .view-switcher,
+  .app-shell:not(.mobile-menu-open) .bottom-bar {
+    display: none;
+  }
+
+  .app-shell:not(.mobile-menu-open) .top-bar {
+    position: fixed;
+    top: max(10px, env(safe-area-inset-top));
+    right: 10px;
+    left: 10px;
+    height: 44px;
+    width: auto;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    pointer-events: none;
+  }
+
+  .app-shell:not(.mobile-menu-open) .brand-block {
+    width: max-content;
+    height: 44px;
+    padding: 0 13px 0 9px;
+    border: 1px solid rgba(139, 178, 230, 0.16);
+    border-radius: 22px;
+    background: linear-gradient(145deg, rgba(5, 10, 18, 0.72), rgba(4, 8, 14, 0.44));
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px) saturate(112%);
+    pointer-events: auto;
+  }
+
+  .app-shell:not(.mobile-menu-open) .mobile-menu-toggle {
+    width: 44px;
+    height: 44px;
+    justify-self: end;
+    gap: 0;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(5, 10, 18, 0.62);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(10px) saturate(112%);
+    font-size: 0;
+    pointer-events: auto;
+  }
+
+  .app-shell:not(.mobile-menu-open) .mobile-menu-toggle span {
+    display: grid;
+    width: 20px;
+    height: 20px;
+    place-items: center;
+    font-size: 0;
+    line-height: 1;
+  }
+
+  .mobile-menu-icon {
+    display: block;
+    width: 20px;
+    height: 20px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.7;
+    stroke-linecap: round;
   }
 
   .brand-mark {
@@ -1068,8 +1186,14 @@ kbd {
   }
 
   .left-panel {
-    max-height: 34dvh;
+    order: 2;
+    height: 54dvh;
+    min-height: 54dvh;
+    max-height: 54dvh;
+    flex: 0 0 54dvh;
     overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .right-panel {
@@ -1088,14 +1212,14 @@ kbd {
   }
 
   .center-time-chip {
-    order: 2;
+    order: 3;
     min-width: 0;
     padding: 9px 12px;
     font-size: 12px;
   }
 
   .view-switcher {
-    order: 3;
+    order: 1;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 5px;
     padding: 6px;

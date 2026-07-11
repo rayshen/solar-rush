@@ -2,7 +2,7 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-An interactive, browser-based Solar System viewer and time simulator. Built with React and Three.js, Solar Rush brings planets, moons, orbital motion, time controls, and celestial data together in a single 3D scene.
+An interactive, browser-based Solar System viewer and time simulator. Built with React and Three.js, Solar Rush combines ephemeris-driven planet positions, moons, orbital motion, time controls, celestial data, and a responsive 3D interface in a single scene.
 
 [Live Demo](https://rayshen.github.io/solar-rush/)
 
@@ -15,16 +15,17 @@ It is more than a celestial data viewer. It aims to be a window through which an
 ## Features
 
 - Explore the Sun, all eight planets, and major moons through a searchable celestial index.
-- Calculate celestial positions from orbital parameters with continuous time progression and multiple simulation speeds.
+- Calculate heliocentric positions for all eight planets with Astronomy Engine's VSOP87/NOVAS-based ephemeris, with continuous time progression and multiple simulation speeds.
 - Switch between `Orbit View`, `Artistic Spiral`, and `Follow View`.
 - Rotate, zoom, pan, select celestial bodies, and keep the selected target centered.
 - Inspect radius, orbital and rotation periods, gravity, escape velocity, and other celestial data.
 - View synchronized UTC, Beijing time, and the Chinese lunar calendar.
-- Experience real celestial textures, a star field, orbital paths, and motion trails that enhance spatial depth.
+- Experience real celestial textures, a J2000-aligned procedural Milky Way with a galactic bulge and dust lane, catalogue stars, orbital paths, and motion trails.
+- Use a mobile-first interface with an immersive floating header, collapsible controls, touch-friendly celestial navigation, and scrollable detail panels.
 
 ## Visual Concepts
 
-The design combines the information density of professional astronomy software with an immersive space experience. Celestial navigation sits on the left, the central area is reserved for 3D observation, details about the selected body appear on the right, and time controls occupy the top and bottom edges.
+The desktop design combines the information density of professional astronomy software with an immersive space experience. Celestial navigation sits on the left, the central area is reserved for 3D observation, details about the selected body appear on the right, and time controls occupy the top and bottom edges. On mobile, the scene remains unobstructed behind a compact floating header, while view controls, celestial navigation, details, and the timeline live in a scrollable menu.
 
 ### Orbit View
 
@@ -60,10 +61,25 @@ The screenshots below were captured from the current development version of all 
 
 ![Current Solar Rush Follow View](docs/images/follow-view.jpg)
 
+### Mobile View
+
+The mobile layout keeps the 3D scene dominant and moves dense controls into an expandable, touch-friendly menu.
+
+![Current Solar Rush mobile view](docs/images/mobile-view.jpg)
+
+## Scientific Model and Scale
+
+- Planet positions use [Astronomy Engine](https://github.com/cosinekitty/astronomy) heliocentric vectors in the J2000 equatorial frame, transformed into the scene's J2000 ecliptic frame.
+- Major moon positions use compact J2000 mean-element propagation; they are visual approximations rather than Horizons/SPICE-grade satellite ephemerides.
+- The Milky Way is procedural rather than photographic, but its plane and Galactic center are transformed from Galactic coordinates into the J2000 catalogue sky. Density, bulge width, star clouds, and the central dust lane are visually modelled.
+- Visual mode compresses body sizes and orbital distances independently for readability. Physical mode uses one unified scale: one scene unit equals 50 million kilometres.
+- `Artistic Spiral` motion trails express movement and depth; they are not a physical model of the Solar System's Galactic orbit.
+
 ## Tech Stack
 
 - React 19
 - Three.js
+- Astronomy Engine 2
 - Vite 7
 - GitHub Actions / GitHub Pages
 
@@ -87,4 +103,4 @@ The project is deployed automatically through [GitHub Actions](.github/workflows
 
 ## Data and Asset Notes
 
-Orbital and celestial data are used for interactive visualization. Some views are artistic interpretations and should not replace professional astronomical calculations. Texture sources and licensing details are documented in [ATTRIBUTION.md](public/textures/ATTRIBUTION.md).
+Planet positions are suitable for interactive visualization, not spacecraft navigation or professional observation planning. Moon propagation, visual scale compression, the procedural Milky Way, and motion trails remain approximations or artistic interpretations. Texture sources and licensing details are documented in [ATTRIBUTION.md](public/textures/ATTRIBUTION.md).
