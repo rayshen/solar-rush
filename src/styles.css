@@ -23,6 +23,10 @@ body,
   overflow: hidden;
 }
 
+body {
+  overscroll-behavior: none;
+}
+
 button,
 select {
   font: inherit;
@@ -36,6 +40,7 @@ button {
   position: relative;
   width: 100vw;
   height: 100vh;
+  height: 100dvh;
   min-width: 1040px;
   overflow: hidden;
   background:
@@ -161,7 +166,6 @@ p {
 .controls button,
 .controls select,
 .segmented button,
-.tool-cluster button,
 .view-switcher button,
 .timeline-actions button,
 .detail-tabs button {
@@ -193,8 +197,17 @@ p {
 .controls select {
   width: 92px;
   height: 36px;
-  margin-top: 6px;
   padding: 0 10px;
+}
+
+.speed-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.speed-control span {
+  white-space: nowrap;
 }
 
 .transport-controls {
@@ -221,12 +234,6 @@ p {
 
 .transport-controls button:last-child {
   border-right: 0;
-}
-
-.menu-button {
-  min-width: 40px !important;
-  padding: 0 !important;
-  font-size: 18px !important;
 }
 
 .search-box {
@@ -285,40 +292,6 @@ p {
   width: 312px;
   bottom: 200px;
   padding: 12px;
-}
-
-.left-tool-stack {
-  position: absolute;
-  left: 14px;
-  bottom: 90px;
-  display: grid;
-  gap: 16px;
-}
-
-.tool-cluster {
-  display: grid;
-  grid-template-columns: repeat(4, 44px);
-  gap: 0;
-  overflow: hidden;
-  border: 1px solid rgba(139, 178, 230, 0.18);
-  border-radius: 8px;
-  background: rgba(4, 9, 18, 0.78);
-  backdrop-filter: blur(14px);
-}
-
-.tool-cluster button {
-  width: 44px;
-  height: 44px;
-  border: 0;
-  border-right: 1px solid rgba(139, 178, 230, 0.14);
-  border-radius: 0;
-  background: transparent;
-  color: #c7d6ec;
-  font-size: 18px;
-}
-
-.tool-cluster button:last-child {
-  border-right: 0;
 }
 
 .panel-title {
@@ -552,6 +525,38 @@ p {
   color: #9db1cf;
   font-size: 11px;
   line-height: 1.55;
+}
+
+.science-status {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding: 8px 9px;
+  border: 1px solid rgba(125, 248, 255, 0.16);
+  border-radius: 6px;
+  background: rgba(22, 71, 83, 0.16);
+}
+
+.science-status span {
+  color: #76dce5;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.science-status small {
+  color: #8296b3;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.science-status.warning {
+  border-color: rgba(255, 169, 88, 0.28);
+  background: rgba(112, 55, 18, 0.18);
+}
+
+.science-status.warning span {
+  color: #ffb36f;
 }
 
 .stat-list {
@@ -869,5 +874,197 @@ kbd {
     height: auto;
     gap: 10px;
     padding: 12px;
+  }
+}
+
+@media (max-width: 700px) {
+  html,
+  body,
+  #root {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  body {
+    background: #03060d;
+  }
+
+  button,
+  select,
+  input {
+    touch-action: manipulation;
+  }
+
+  .app-shell {
+    display: flex;
+    width: 100%;
+    height: auto;
+    min-height: 100dvh;
+    flex-direction: column;
+    gap: 10px;
+    padding:
+      max(10px, env(safe-area-inset-top))
+      10px
+      max(12px, env(safe-area-inset-bottom));
+    overflow: visible;
+  }
+
+  .space-stage {
+    position: fixed;
+    z-index: 0;
+  }
+
+  .space-stage canvas {
+    touch-action: none;
+  }
+
+  .top-bar,
+  .left-panel,
+  .right-panel,
+  .center-time-chip,
+  .view-switcher,
+  .bottom-bar {
+    position: relative;
+    z-index: 1;
+    inset: auto;
+    width: 100%;
+    transform: none;
+  }
+
+  .top-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px 12px;
+    padding: 10px;
+    border: 1px solid rgba(139, 178, 230, 0.18);
+    border-radius: 10px;
+  }
+
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+  }
+
+  .top-bar h1 {
+    font-size: 17px;
+  }
+
+  .time-strip {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    order: 3;
+  }
+
+  .time-strip span {
+    font-size: 9px;
+    letter-spacing: 0.04em;
+  }
+
+  .time-strip strong {
+    margin-top: 3px;
+    font-size: 10px;
+  }
+
+  .controls {
+    gap: 7px;
+  }
+
+  .speed-control span {
+    display: none;
+  }
+
+  .controls select {
+    width: 74px;
+    height: 36px;
+    margin-top: 0;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+
+  .transport-controls {
+    grid-template-columns: repeat(2, 36px);
+  }
+
+  .left-panel,
+  .right-panel {
+    max-height: none;
+    overflow: visible;
+    border-radius: 10px;
+  }
+
+  .left-panel {
+    max-height: 34dvh;
+    overflow-y: auto;
+  }
+
+  .right-panel {
+    order: 4;
+  }
+
+  .body-row {
+    min-height: 44px;
+  }
+
+  .detail-tabs button {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 9px;
+    text-overflow: ellipsis;
+  }
+
+  .center-time-chip {
+    order: 2;
+    min-width: 0;
+    padding: 9px 12px;
+    font-size: 12px;
+  }
+
+  .view-switcher {
+    order: 3;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+    padding: 6px;
+  }
+
+  .view-switcher button {
+    height: 40px;
+    padding: 0 5px;
+    font-size: 10px;
+    line-height: 1.15;
+  }
+
+  .bottom-bar {
+    order: 5;
+    display: block;
+    height: auto;
+    padding: 12px;
+    border-radius: 10px;
+  }
+
+  .timeline {
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .timeline .track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
+    margin: 0 8px;
+  }
+
+  .timeline > span {
+    font-size: 10px;
+  }
+
+  .timeline > span:last-child {
+    text-align: right;
+  }
+
+  .hint-strip {
+    display: none;
   }
 }

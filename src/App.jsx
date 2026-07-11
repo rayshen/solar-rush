@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { bodies, bodyMap, planetEphemerisElements } from './solarData.js';
+import { brightStarCatalog, satelliteMeanElements } from './astronomyData.js';
 
 const DAY_MS = 86_400_000;
 const J2000_MS = Date.UTC(2000, 0, 1, 12);
 const SYSTEM_TRAVEL_Z = 1;
 const BACKGROUND_TRAVEL_Z = -SYSTEM_TRAVEL_Z;
 const START_DATE = new Date();
+const PHYSICAL_KM_PER_UNIT = 50_000_000;
 const simulationSpeeds = [
   { label: '1.00x', secondsPerSecond: 1 },
   { label: '60x', secondsPerSecond: 60 },
@@ -24,13 +26,13 @@ const DEFAULT_VIEW_MODE = 'helical';
 
 const viewModeLabels = {
   orbit: 'Orbit',
-  helical: '3D Spiral',
+  helical: 'Artistic Spiral',
   follow: 'Follow',
 };
 
 const viewModeDescriptions = {
   orbit: '俯视完整轨道结构，适合比较行星位置与系统尺度。',
-  helical: '太阳系向右推进，左侧光迹记录各天体经过的空间路径。',
+  helical: '艺术化银河惯性视图；光迹用于表达运动，不代表精确银河轨道。',
   follow: '跟随选中天体，仅突出它的主轨迹与局部系统。',
 };
 
@@ -102,21 +104,6 @@ function estimateEscapeVelocity(body) {
   if (!Number.isFinite(gravity)) return '—';
   const velocity = Math.sqrt(2 * gravity * body.radiusKm * 1000) / 1000;
   return `${formatFixed(velocity, 1)} km/s`;
-}
-
-function pseudoSkyCoordinate(body, type) {
-  const seed = [...body.id].reduce((sum, char) => sum + char.charCodeAt(0), 0);
-  if (type === 'ra') {
-    const hours = seed % 24;
-    const minutes = (seed * 7) % 60;
-    const seconds = (seed * 13) % 60;
-    return `${String(hours).padStart(2, '0')}h ${String(minutes).padStart(2, '0')}m ${String(seconds).padStart(2, '0')}s`;
-  }
-  const sign = seed % 2 ? '+' : '-';
-  const degrees = (seed * 3) % 80;
-  const minutes = (seed * 5) % 60;
-  const seconds = (seed * 11) % 60;
-  return `${sign}${String(degrees).padStart(2, '0')}° ${String(minutes).padStart(2, '0')}′ ${String(seconds).padStart(2, '0')}″`;
 }
 
 function bodyPhase(id) {
@@ -192,6 +179,28 @@ function setPlanetScenePosition(id, date, sceneSemiMajorAxis, out, orbitEccentri
   // Map the JPL ecliptic frame into Three.js without mirroring its handedness:
   // ecliptic +X -> scene +X, +Y -> scene -Z, +Z -> scene +Y.
   return out.set(eclipticX * sceneScale, eclipticZ * sceneScale, -eclipticY * sceneScale);
+}
+
+function setSatelliteScenePosition(body, date, sceneSemiMajorAxis, out) {
+  const elements = satelliteMeanElements[body.id];
+  if (!elements) return out.set(sceneSemiMajorAxis, 0, 0);
+  const elapsedDays = (date.getTime() - J2000_MS) / DAY_MS;
+  const meanAnomaly = THREE.MathUtils.degToRad(elements.meanAnomaly)
+    + elapsedDays / elements.period * Math.PI * 2;
+  const eccentricAnomaly = solveEccentricAnomaly(meanAnomaly, elements.e);
+  const x = elements.a * (Math.cos(eccentricAnomaly) - elements.e);
+  const y = elements.a * Math.sqrt(1 - elements.e * elements.e) * Math.sin(eccentricAnomaly);
+  const argument = THREE.MathUtils.degToRad(elements.periapsis);
+  const node = THREE.MathUtils.degToRad(elements.node);
+  const inclination = THREE.MathUtils.degToRad(elements.inclination);
+  const cosA = Math.cos(argument); const sinA = Math.sin(argument);
+  const cosN = Math.cos(node); const sinN = Math.sin(node);
+  const cosI = Math.cos(inclination); const sinI = Math.sin(inclination);
+  const px = (cosA * cosN - sinA * sinN * cosI) * x + (-sinA * cosN - cosA * sinN * cosI) * y;
+  const py = (cosA * sinN + sinA * cosN * cosI) * x + (-sinA * sinN + cosA * cosN * cosI) * y;
+  const pz = sinA * sinI * x + cosA * sinI * y;
+  const scale = sceneSemiMajorAxis / elements.a;
+  return out.set(px * scale, pz * scale, -py * scale);
 }
 
 function createPlanetOrbitLine(body, date, color, opacity = 0.28) {
@@ -343,7 +352,7 @@ function createHelicalTrail(color, pointCount = 300, opacity = 0.74, glowTexture
 }
 
 function createSunMotionLine(glowTexture) {
-  const pointCount = 1600;
+  const pointCount = 2200;
   const positions = new Float32Array(pointCount * 3);
   const colors = new Float32Array(pointCount * 3);
   const geometry = new THREE.BufferGeometry();
@@ -352,7 +361,7 @@ function createSunMotionLine(glowTexture) {
   const baseColor = new THREE.Color('#ffbf47');
   for (let index = 0; index < pointCount; index += 1) {
     const progress = index / (pointCount - 1);
-    const intensity = 1 - Math.pow(progress, 0.72) * 0.94;
+    const intensity = Math.pow(1 - progress, 1.35);
     colors[index * 3] = baseColor.r * intensity;
     colors[index * 3 + 1] = baseColor.g * intensity;
     colors[index * 3 + 2] = baseColor.b * intensity;
@@ -434,7 +443,7 @@ function createStarField(starTexture) {
   const geometry = new THREE.BufferGeometry();
   const positions = [];
   const colors = [];
-  for (let i = 0; i < 18000; i += 1) {
+  for (let i = 0; i < 7000; i += 1) {
     const radius = THREE.MathUtils.randFloat(36, 230);
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
@@ -462,47 +471,112 @@ function createStarField(starTexture) {
   );
 }
 
+function starColorFromBv(bv) {
+  if (bv < -0.05) return new THREE.Color('#a9c8ff');
+  if (bv < 0.35) return new THREE.Color('#e3edff');
+  if (bv < 0.9) return new THREE.Color('#fff4dc');
+  if (bv < 1.5) return new THREE.Color('#ffd39b');
+  return new THREE.Color('#ff9d72');
+}
+
+function createCatalogStarField(starTexture) {
+  const positions = [];
+  const colors = [];
+  const sizes = [];
+  for (const star of brightStarCatalog) {
+    const ra = THREE.MathUtils.degToRad(star.ra);
+    const dec = THREE.MathUtils.degToRad(star.dec);
+    const radius = 205;
+    positions.push(
+      radius * Math.cos(dec) * Math.cos(ra),
+      radius * Math.sin(dec),
+      -radius * Math.cos(dec) * Math.sin(ra),
+    );
+    const color = starColorFromBv(star.bv);
+    colors.push(color.r, color.g, color.b);
+    sizes.push(THREE.MathUtils.clamp(1.65 - star.mag * 0.24, 0.65, 2.1));
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  // WebGL PointsMaterial has one size per draw call, so magnitude is encoded
+  // primarily as luminance; the catalogue layer remains distinct and stable.
+  return new THREE.Points(geometry, new THREE.PointsMaterial({
+    map: starTexture,
+    size: 1.15,
+    vertexColors: true,
+    transparent: true,
+    opacity: 1,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  }));
+}
+
 function createMilkyWayBand(starTexture) {
   const geometry = new THREE.BufferGeometry();
   const positions = [];
   const colors = [];
-  for (let i = 0; i < 8500; i += 1) {
-    const x = THREE.MathUtils.randFloatSpread(180);
-    const y = THREE.MathUtils.randFloatSpread(8) + Math.sin(x * 0.035) * 4;
-    const z = THREE.MathUtils.randFloat(-150, -55) + Math.cos(x * 0.018) * 14;
-    positions.push(x, y, z);
-    const warmth = THREE.MathUtils.randFloat(0.62, 1);
-    colors.push(warmth * 0.72, warmth * 0.82, warmth);
+  for (let i = 0; i < 28_000; i += 1) {
+    const longitude = Math.random() * Math.PI * 2;
+    const latitudeSpread = Math.pow(Math.random(), 2.8) * 0.18;
+    const latitude = (Math.random() > 0.5 ? 1 : -1) * latitudeSpread
+      + Math.sin(longitude * 2.0) * 0.018;
+    const radius = THREE.MathUtils.randFloat(175, 220);
+    const cosLatitude = Math.cos(latitude);
+    positions.push(
+      radius * cosLatitude * Math.cos(longitude),
+      radius * Math.sin(latitude),
+      radius * cosLatitude * Math.sin(longitude),
+    );
+    const centerGlow = 0.62 + Math.pow(Math.max(0, Math.cos(longitude)), 4) * 0.48;
+    const dustVariation = 0.68 + Math.sin(longitude * 13.0 + latitude * 80.0) * 0.16;
+    const warmth = THREE.MathUtils.randFloat(0.72, 1.0) * centerGlow * dustVariation;
+    colors.push(warmth * 0.9, warmth * 0.84, warmth);
   }
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   const material = new THREE.PointsMaterial({
     map: starTexture,
-    size: 0.14,
+    size: 0.3,
     vertexColors: true,
     transparent: true,
-    opacity: 0.4,
+    opacity: 0.88,
     depthWrite: false,
     alphaTest: 0.02,
+    blending: THREE.AdditiveBlending,
   });
-  const band = new THREE.Points(geometry, material);
-  band.rotation.z = THREE.MathUtils.degToRad(-14);
-  band.rotation.x = THREE.MathUtils.degToRad(10);
+  const glowMaterial = new THREE.PointsMaterial({
+    map: starTexture,
+    size: 1.35,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.22,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  });
+  const band = new THREE.Group();
+  band.add(new THREE.Points(geometry, glowMaterial), new THREE.Points(geometry, material));
+  band.rotation.z = THREE.MathUtils.degToRad(-58);
+  band.rotation.x = THREE.MathUtils.degToRad(24);
   return band;
 }
 
 function createSunMaterial() {
+  const surfaceTexture = loadBodyTexture('/textures/bodies/sun.jpg', { color: true });
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
+      uSurfaceMap: { value: surfaceTexture },
     },
     vertexShader: `
+      varying vec2 vUv;
       varying vec3 vSurfacePosition;
       varying vec3 vWorldNormal;
       varying vec3 vViewDirection;
 
       void main() {
         vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vUv = uv;
         vSurfacePosition = normalize(position);
         vWorldNormal = normalize(mat3(modelMatrix) * normal);
         vViewDirection = cameraPosition - worldPosition.xyz;
@@ -511,6 +585,8 @@ function createSunMaterial() {
     `,
     fragmentShader: `
       uniform float uTime;
+      uniform sampler2D uSurfaceMap;
+      varying vec2 vUv;
       varying vec3 vSurfacePosition;
       varying vec3 vWorldNormal;
       varying vec3 vViewDirection;
@@ -544,24 +620,20 @@ function createSunMaterial() {
       }
 
       void main() {
+        vec3 observedSurface = texture2D(uSurfaceMap, vUv).rgb;
         vec3 flow = vec3(uTime * 0.035, -uTime * 0.018, uTime * 0.024);
         float broad = fbm(vSurfacePosition * 3.8 + flow);
         float cells = fbm(vSurfacePosition * 12.0 - flow * 1.7);
         float filaments = 1.0 - smoothstep(0.035, 0.2, abs(fbm(vSurfacePosition * 7.0 + flow * 2.2) - 0.52));
         float heat = clamp(broad * 0.82 + cells * 0.42 + filaments * 0.3, 0.0, 1.35);
 
-        vec3 deepOrange = vec3(0.42, 0.012, 0.0);
-        vec3 moltenOrange = vec3(1.0, 0.12, 0.002);
-        vec3 solarGold = vec3(1.0, 0.58, 0.025);
-        vec3 whiteHot = vec3(1.0, 0.96, 0.58);
-        vec3 color = mix(deepOrange, moltenOrange, smoothstep(0.22, 0.62, heat));
-        color = mix(color, solarGold, smoothstep(0.55, 0.9, heat));
-        color = mix(color, whiteHot, smoothstep(0.88, 1.2, heat));
+        vec3 color = observedSurface * mix(0.68, 1.18, smoothstep(0.2, 1.05, heat));
+        color = mix(color, vec3(1.0, 0.7, 0.18), filaments * 0.18);
 
         float facing = clamp(dot(normalize(vWorldNormal), normalize(vViewDirection)), 0.0, 1.0);
         float limb = pow(facing, 0.42);
         color *= mix(0.55, 1.26, limb);
-        color += vec3(1.0, 0.18, 0.0) * filaments * 0.22;
+        color += vec3(1.0, 0.24, 0.01) * filaments * 0.12;
         gl_FragColor = vec4(color, 1.0);
       }
     `,
@@ -605,6 +677,125 @@ function createRimGlowMaterial(color, opacity, power = 2.4) {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
+}
+
+function loadBodyTexture(path, { color = false } = {}) {
+  const texture = new THREE.TextureLoader().load(path);
+  if (color) texture.colorSpace = THREE.SRGBColorSpace;
+  texture.anisotropy = 8;
+  texture.wrapS = THREE.RepeatWrapping;
+  return texture;
+}
+
+const bodyTextureProfiles = {
+  mercury: { map: 'mercury.jpg', normal: 'mercury-normal.jpg' },
+  venus: { map: 'venus.jpg', normal: 'venus-normal.jpg' },
+  moon: { map: 'moon.jpg', normal: 'moon-normal.jpg' },
+  mars: { map: 'mars.jpg', normal: 'mars-normal.jpg' },
+  phobos: { map: 'phobos.jpg', monochrome: true },
+  deimos: { map: 'deimos.jpg', monochrome: true },
+  jupiter: { map: 'jupiter.jpg', atmosphere: true },
+  io: { map: 'io.jpg' },
+  europa: { map: 'europa.jpg', tint: '#d6cbb8' },
+  ganymede: { map: 'ganymede.jpg', monochrome: true },
+  callisto: { map: 'callisto.jpg', monochrome: true },
+  saturn: { map: 'saturn.jpg', atmosphere: true },
+  titan: { map: 'titan.jpg', atmosphere: true },
+  rhea: { map: 'rhea.jpg', monochrome: true },
+  iapetus: { map: 'iapetus.jpg', monochrome: true },
+  dione: { map: 'dione.jpg', monochrome: true },
+  uranus: { map: 'uranus.jpg', atmosphere: true },
+  titania: { map: 'titania.jpg', monochrome: true },
+  oberon: { map: 'oberon.jpg', monochrome: true },
+  neptune: { map: 'neptune.jpg', atmosphere: true },
+  triton: { map: 'triton.jpg' },
+};
+
+const atmosphereProfiles = {
+  venus: { color: '#e8ad5d', opacity: 0.68, scale: 1.045, power: 2.35 },
+  earth: { color: '#4c89d9', opacity: 0.72, scale: 1.035, power: 2.65 },
+  mars: { color: '#d7835f', opacity: 0.18, scale: 1.025, power: 2.8 },
+  jupiter: { color: '#e2bd91', opacity: 0.3, scale: 1.025, power: 2.65 },
+  saturn: { color: '#e6ce9a', opacity: 0.3, scale: 1.025, power: 2.65 },
+  titan: { color: '#d8882d', opacity: 0.76, scale: 1.075, power: 2.15 },
+  uranus: { color: '#8fdbe0', opacity: 0.38, scale: 1.03, power: 2.55 },
+  neptune: { color: '#4779ff', opacity: 0.42, scale: 1.03, power: 2.5 },
+};
+
+function createEarthNightMaterial() {
+  const nightTexture = loadBodyTexture('/textures/earth/night.png', { color: true });
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      uNightMap: { value: nightTexture },
+      uSunPosition: { value: new THREE.Vector3() },
+      uIntensity: { value: 1.15 },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying vec3 vWorldNormal;
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec4 worldPosition = modelMatrix * vec4(position, 1.0);
+        vUv = uv;
+        vWorldNormal = normalize(mat3(modelMatrix) * normal);
+        vWorldPosition = worldPosition.xyz;
+        gl_Position = projectionMatrix * viewMatrix * worldPosition;
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uNightMap;
+      uniform vec3 uSunPosition;
+      uniform float uIntensity;
+      varying vec2 vUv;
+      varying vec3 vWorldNormal;
+      varying vec3 vWorldPosition;
+
+      void main() {
+        vec3 lights = texture2D(uNightMap, vUv).rgb;
+        vec3 sunDirection = normalize(uSunPosition - vWorldPosition);
+        float daylight = dot(normalize(vWorldNormal), sunDirection);
+        float night = 1.0 - smoothstep(-0.18, 0.16, daylight);
+        float luminance = dot(lights, vec3(0.2126, 0.7152, 0.0722));
+        float alpha = smoothstep(0.025, 0.48, luminance) * night;
+        gl_FragColor = vec4(lights * uIntensity, alpha * 0.92);
+      }
+    `,
+    transparent: true,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    toneMapped: false,
+  });
+}
+
+function addEarthSurfaceLayers(mesh, radius) {
+  const detailGeometry = new THREE.SphereGeometry(radius, 144, 72);
+  const nightMaterial = createEarthNightMaterial();
+  const nightLights = new THREE.Mesh(detailGeometry, nightMaterial);
+  nightLights.scale.setScalar(1.0015);
+  nightLights.renderOrder = 1;
+  mesh.add(nightLights);
+
+  const cloudTexture = loadBodyTexture('/textures/earth/clouds.png', { color: true });
+  const clouds = new THREE.Mesh(
+    detailGeometry.clone(),
+    new THREE.MeshPhongMaterial({
+      map: cloudTexture,
+      alphaMap: cloudTexture,
+      color: '#eef7ff',
+      transparent: true,
+      opacity: 0.72,
+      alphaTest: 0.025,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      shininess: 4,
+    }),
+  );
+  clouds.scale.setScalar(1.011);
+  clouds.renderOrder = 2;
+  mesh.add(clouds);
+
+  return { clouds, nightMaterial };
 }
 
 function createSeededRandom(seedText) {
@@ -799,22 +990,35 @@ function createProceduralPlanetTexture(body) {
 }
 
 function createPlanetRingMaterial(body) {
+  if (body.id === 'saturn') {
+    const texture = loadBodyTexture('/textures/bodies/saturn-rings.png', { color: true });
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.ClampToEdgeWrapping;
+    texture.repeat.set(0.5, 1);
+    return new THREE.MeshBasicMaterial({
+      map: texture,
+      color: '#eee1bd',
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.94,
+      alphaTest: 0.015,
+      depthWrite: false,
+    });
+  }
+
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
   const center = 256;
-  const inner = body.id === 'saturn' ? 142 : 176;
-  const outer = body.id === 'saturn' ? 250 : 226;
+  const inner = 176;
+  const outer = 226;
   const random = createSeededRandom(`${body.id}-rings`);
   ctx.clearRect(0, 0, 512, 512);
   for (let radius = inner; radius <= outer; radius += 1) {
     const progress = (radius - inner) / (outer - inner);
-    const gap = body.id === 'saturn' && progress > 0.56 && progress < 0.63;
-    const alpha = gap ? 0.04 : 0.2 + random() * 0.5;
-    ctx.strokeStyle = body.id === 'saturn'
-      ? `rgba(${190 + Math.floor(random() * 45)},${170 + Math.floor(random() * 40)},${125 + Math.floor(random() * 40)},${alpha})`
-      : `rgba(145,215,222,${alpha * 0.34})`;
+    const alpha = 0.2 + random() * 0.5;
+    ctx.strokeStyle = `rgba(145,215,222,${alpha * 0.34})`;
     ctx.lineWidth = 1.2;
     ctx.beginPath();
     ctx.arc(center, center, radius, 0, Math.PI * 2);
@@ -826,7 +1030,7 @@ function createPlanetRingMaterial(body) {
     map: texture,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: body.id === 'saturn' ? 0.88 : 0.42,
+    opacity: 0.42,
     depthWrite: false,
   });
 }
@@ -867,104 +1071,33 @@ function createLabelSprite(body) {
 
 function createPlanetMaterial(body) {
   if (body.id === 'earth') {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-    const random = createSeededRandom('earth');
-    const gradient = ctx.createLinearGradient(0, 0, 512, 256);
-    gradient.addColorStop(0, '#0d3b78');
-    gradient.addColorStop(0.55, '#2d7fd6');
-    gradient.addColorStop(1, '#081f3f');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 512, 256);
-    ctx.fillStyle = '#2c8b5d';
-    for (let i = 0; i < 28; i += 1) {
-      const x = random() * 512;
-      const y = 24 + random() * 208;
-      ctx.beginPath();
-      ctx.ellipse(x, y, 18 + random() * 46, 6 + random() * 22, random() * Math.PI, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.fillStyle = 'rgba(184,151,83,0.42)';
-    for (let i = 0; i < 18; i += 1) {
-      ctx.beginPath();
-      ctx.ellipse(random() * 512, 45 + random() * 166, 8 + random() * 28, 4 + random() * 14, random() * Math.PI, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.fillStyle = 'rgba(255,255,255,0.55)';
-    for (let i = 0; i < 34; i += 1) {
-      const x = random() * 512;
-      const y = random() * 256;
-      ctx.beginPath();
-      ctx.ellipse(x, y, 14 + random() * 60, 3 + random() * 9, random() * Math.PI, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    const polarCaps = ctx.createLinearGradient(0, 0, 0, 256);
-    polarCaps.addColorStop(0, 'rgba(245,250,255,0.96)');
-    polarCaps.addColorStop(0.12, 'rgba(245,250,255,0)');
-    polarCaps.addColorStop(0.88, 'rgba(245,250,255,0)');
-    polarCaps.addColorStop(1, 'rgba(245,250,255,0.94)');
-    ctx.fillStyle = polarCaps;
-    ctx.fillRect(0, 0, 512, 256);
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
-    return new THREE.MeshStandardMaterial({
-      map: texture,
-      roughness: 0.85,
-      metalness: 0.02,
-      emissive: '#1b2d4a',
-      emissiveIntensity: 0.16,
+    return new THREE.MeshPhongMaterial({
+      map: loadBodyTexture('/textures/earth/day.jpg', { color: true }),
+      normalMap: loadBodyTexture('/textures/earth/normal.jpg'),
+      normalScale: new THREE.Vector2(0.62, 0.62),
+      specularMap: loadBodyTexture('/textures/earth/specular.jpg'),
+      specular: new THREE.Color('#4d7189'),
+      shininess: 14,
     });
   }
 
-  if (['jupiter', 'saturn'].includes(body.id)) {
-    const canvas = document.createElement('canvas');
-    canvas.width = 512;
-    canvas.height = 256;
-    const ctx = canvas.getContext('2d');
-    const random = createSeededRandom(body.id);
-    const bandPalette = body.id === 'jupiter'
-      ? ['#6f4934', '#b97e55', '#e5c79f', '#f1dfbd', '#a65e3f', '#d8aa79']
-      : ['#8f7a56', '#c3ad7e', '#e2cf9f', '#d4bd87', '#f0dfb5'];
-    for (let y = 0; y < 256; y += 1) {
-      const band = Math.floor((y + Math.sin(y * 0.11) * 4) / (body.id === 'jupiter' ? 13 : 10));
-      const bandColor = new THREE.Color(bandPalette[Math.abs(band) % bandPalette.length]);
-      const tone = 0.86 + Math.sin(y * 0.21) * 0.08 + Math.sin(y * 0.047) * 0.06;
-      ctx.fillStyle = `rgb(${Math.floor(bandColor.r * tone * 255)}, ${Math.floor(bandColor.g * tone * 255)}, ${Math.floor(bandColor.b * tone * 255)})`;
-      ctx.fillRect(0, y, 512, 1);
-    }
-    for (let y = 0; y < 256; y += 10) {
-      ctx.strokeStyle = `rgba(255, 245, 220, ${0.14 + random() * 0.16})`;
-      ctx.lineWidth = 2 + random() * 5;
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      for (let x = 0; x <= 512; x += 16) {
-        ctx.lineTo(x, y + Math.sin(x * 0.028 + y * 0.06) * 5);
-      }
-      ctx.stroke();
-    }
-    if (body.id === 'jupiter') {
-      ctx.fillStyle = 'rgba(129, 47, 31, 0.88)';
-      ctx.beginPath();
-      ctx.ellipse(350, 140, 38, 19, -0.16, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(244, 173, 116, 0.62)';
-      ctx.lineWidth = 4;
-      ctx.stroke();
-    }
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
-    texture.wrapS = THREE.RepeatWrapping;
-    return new THREE.MeshStandardMaterial({
-      map: texture,
-      roughness: 0.72,
+  const profile = bodyTextureProfiles[body.id];
+  if (profile) {
+    const map = loadBodyTexture(`/textures/bodies/${profile.map}`, { color: true });
+    const materialOptions = {
+      map,
+      color: profile.tint ?? (profile.monochrome ? body.color : '#ffffff'),
+      roughness: profile.atmosphere ? 0.78 : 0.92,
       metalness: 0,
-      emissive: body.color,
-      emissiveIntensity: 0.13,
-    });
+    };
+    if (profile.normal) {
+      materialOptions.normalMap = loadBodyTexture(`/textures/bodies/${profile.normal}`);
+      materialOptions.normalScale = new THREE.Vector2(0.52, 0.52);
+    } else if (!profile.atmosphere) {
+      materialOptions.bumpMap = map;
+      materialOptions.bumpScale = body.type === 'moon' ? 0.014 : 0.01;
+    }
+    return new THREE.MeshStandardMaterial(materialOptions);
   }
 
   const texture = createProceduralPlanetTexture(body);
@@ -983,7 +1116,6 @@ function createPlanetMaterial(body) {
 function buildSolarScene(mount, options) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#03060d');
-  scene.fog = new THREE.FogExp2('#03060d', 0.008);
 
   const camera = new THREE.PerspectiveCamera(54, mount.clientWidth / mount.clientHeight, 0.05, 800);
   if (options.getState().viewMode === 'helical') camera.position.set(-20, 14, 43);
@@ -999,6 +1131,8 @@ function buildSolarScene(mount, options) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   mount.appendChild(renderer.domElement);
 
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -1010,16 +1144,21 @@ function buildSolarScene(mount, options) {
   controls.rotateSpeed = 0.66;
   if (options.getState().viewMode === 'helical') controls.target.set(0, 0, -11);
 
-  const ambient = new THREE.AmbientLight('#6d88b7', 0.22);
+  const ambient = new THREE.AmbientLight('#7d8da6', 0.05);
   scene.add(ambient);
-  const sunLight = new THREE.PointLight('#fff0c6', 8.5, 230, 1.18);
+  const sunLight = new THREE.PointLight('#fff4dc', 52, 0, 2);
+  sunLight.castShadow = true;
+  sunLight.shadow.mapSize.set(1024, 1024);
+  sunLight.shadow.bias = -0.00025;
   scene.add(sunLight);
-  const cameraLight = new THREE.PointLight('#dbeaff', 4.6, 120, 1.5);
+  const cameraLight = new THREE.PointLight('#dbeaff', 0.35, 0, 2);
   scene.add(cameraLight);
 
   const starTexture = createStarTexture();
   const galaxy = createStarField(starTexture);
   scene.add(galaxy);
+  const catalogStars = createCatalogStarField(starTexture);
+  scene.add(catalogStars);
   const milkyWay = createMilkyWayBand(starTexture);
   scene.add(milkyWay);
 
@@ -1055,7 +1194,7 @@ function buildSolarScene(mount, options) {
     if (!parentGroup) continue;
 
     const pivot = new THREE.Group();
-    pivot.rotation.x = body.type === 'planet' ? 0 : THREE.MathUtils.degToRad(body.inclination);
+    pivot.rotation.x = 0;
     parentGroup.add(pivot);
     orbitPivots.set(body.id, pivot);
 
@@ -1076,10 +1215,15 @@ function buildSolarScene(mount, options) {
 
     const group = new THREE.Group();
     if (body.type === 'planet') setPlanetScenePosition(body.id, START_DATE, body.orbitRadius, group.position);
+    else if (body.type === 'moon') setSatelliteScenePosition(body, START_DATE, body.orbitRadius, group.position);
     else group.position.x = body.orbitRadius;
     pivot.add(group);
 
-    const geometry = new THREE.SphereGeometry(body.scaleRadius, body.type === 'moon' ? 36 : 72, body.type === 'moon' ? 18 : 36);
+    const geometry = new THREE.SphereGeometry(
+      body.scaleRadius,
+      ['sun', 'earth'].includes(body.id) ? 144 : body.type === 'moon' ? 96 : 128,
+      ['sun', 'earth'].includes(body.id) ? 72 : body.type === 'moon' ? 48 : 64,
+    );
     const material = body.id === 'sun'
       ? createSunMaterial()
       : createPlanetMaterial(body);
@@ -1087,7 +1231,13 @@ function buildSolarScene(mount, options) {
     mesh.rotation.z = THREE.MathUtils.degToRad(body.axialTilt);
     if (body.id === 'phobos') mesh.scale.set(1.38, 0.9, 0.78);
     if (body.id === 'deimos') mesh.scale.set(1.24, 0.92, 0.82);
+    mesh.castShadow = body.type !== 'star';
+    mesh.receiveShadow = body.type !== 'star';
     group.add(mesh);
+
+    const earthLayers = body.id === 'earth'
+      ? addEarthSurfaceLayers(mesh, body.scaleRadius)
+      : null;
 
     if (body.id === 'sun') {
       const glow = new THREE.Mesh(
@@ -1102,14 +1252,24 @@ function buildSolarScene(mount, options) {
       group.add(corona);
     }
 
-    if (body.type === 'planet' || body.id === 'titan') {
-      const atmosphereColor = body.id === 'titan' ? '#d8882d' : body.color;
-      const atmosphereOpacity = body.id === 'earth' ? 0.72 : body.id === 'titan' ? 0.66 : 0.42;
+    const atmosphereProfile = atmosphereProfiles[body.id];
+    if (atmosphereProfile) {
       const atmosphere = new THREE.Mesh(
-        new THREE.SphereGeometry(body.scaleRadius * 1.08, 64, 32),
-        createRimGlowMaterial(atmosphereColor, atmosphereOpacity, 2.2),
+        new THREE.SphereGeometry(body.scaleRadius * atmosphereProfile.scale, 96, 48),
+        createRimGlowMaterial(
+          atmosphereProfile.color,
+          atmosphereProfile.opacity,
+          atmosphereProfile.power,
+        ),
       );
       group.add(atmosphere);
+      if (body.id === 'earth') {
+        const outerAtmosphere = new THREE.Mesh(
+          new THREE.SphereGeometry(body.scaleRadius * 1.075, 64, 32),
+          createRimGlowMaterial('#4d9fff', 0.18, 3.4),
+        );
+        group.add(outerAtmosphere);
+      }
     }
 
     if (body.id === 'saturn') {
@@ -1117,7 +1277,9 @@ function buildSolarScene(mount, options) {
         new THREE.RingGeometry(body.scaleRadius * 1.35, body.scaleRadius * 2.35, 128),
         createPlanetRingMaterial(body),
       );
-      ring.rotation.x = Math.PI / 2 + THREE.MathUtils.degToRad(26.7);
+      ring.rotation.set(Math.PI / 2, 0, THREE.MathUtils.degToRad(body.axialTilt));
+      ring.castShadow = true;
+      ring.receiveShadow = true;
       group.add(ring);
     }
 
@@ -1126,7 +1288,9 @@ function buildSolarScene(mount, options) {
         new THREE.RingGeometry(body.scaleRadius * 1.35, body.scaleRadius * 1.65, 96),
         createPlanetRingMaterial(body),
       );
-      ring.rotation.x = THREE.MathUtils.degToRad(7);
+      ring.rotation.set(Math.PI / 2, 0, THREE.MathUtils.degToRad(body.axialTilt));
+      ring.castShadow = true;
+      ring.receiveShadow = true;
       group.add(ring);
     }
 
@@ -1150,7 +1314,8 @@ function buildSolarScene(mount, options) {
     const label = createLabelSprite(body);
     group.add(label);
 
-    bodyNodes.set(body.id, { body, pivot, group, mesh, marker, label });
+    const visuals = group.children.map((object) => ({ object, scale: object.scale.clone() }));
+    bodyNodes.set(body.id, { body, pivot, group, mesh, marker, label, earthLayers, visuals });
     worldPositions.set(body.id, new THREE.Vector3());
   }
 
@@ -1164,7 +1329,6 @@ function buildSolarScene(mount, options) {
   const targetDelta = new THREE.Vector3();
   const followSunVector = new THREE.Vector3();
   const followSideVector = new THREE.Vector3();
-  const backgroundOffset = new THREE.Vector3();
   const backgroundTravelDirection = new THREE.Vector3(0, 0, BACKGROUND_TRAVEL_Z);
   let simDays = 0;
   let elapsedSeconds = 0;
@@ -1175,15 +1339,18 @@ function buildSolarScene(mount, options) {
   let lastViewMode = '';
   let lastCameraRevision = -1;
   const trailPoint = new THREE.Vector3();
+  const physicalRadiusFor = (body) => body.radiusKm / PHYSICAL_KM_PER_UNIT;
+  const physicalOrbitFor = (body) => body.distanceKm / PHYSICAL_KM_PER_UNIT;
 
   const updateSunMotionLine = (mode, selectedId) => {
     const sunPosition = worldPositions.get('sun') ?? targetPosition;
-    const visible = mode === 'helical' || mode === 'follow';
+    const visible = (mode === 'helical' || mode === 'follow')
+      && !(mode === 'follow' && selectedId === 'sun');
     sunMotionLine.group.visible = visible;
     if (!visible) return;
 
     const nearTail = sunBody.scaleRadius * 1.18;
-    const farTail = mode === 'follow' ? 56 : 88;
+    const farTail = mode === 'follow' ? 96 : 150;
     const highlighted = selectedId === 'sun';
     sunMotionLine.material.opacity = highlighted ? 0.96 : 0.42;
     sunMotionLine.glowMaterial.opacity = highlighted ? 0.7 : 0.16;
@@ -1230,6 +1397,11 @@ function buildSolarScene(mount, options) {
     for (const [id, trail] of trailNodes) {
       const body = bodyMap[id];
       const selectedTrail = id === selectedTrailId;
+      const hideSelectedCloseUpTrail = mode === 'follow' && id === selectedTrailId;
+      if (hideSelectedCloseUpTrail) {
+        trail.group.visible = false;
+        continue;
+      }
       const baseOpacity = selectedTrail ? 0.98 : mode === 'follow' ? 0.09 : selectedTrailId ? 0.36 : 0.42;
       trail.group.visible = true;
       trail.material.opacity = baseOpacity;
@@ -1271,24 +1443,39 @@ function buildSolarScene(mount, options) {
     systemRoot.position.set(0, rushingMode ? 0 : Math.sin(simDays * 0.25) * 0.08, forward * SYSTEM_TRAVEL_Z);
     for (const [id, node] of bodyNodes) {
       const orbitDays = node.body.orbitDays || 1;
-      const direction = orbitDays < 0 ? -1 : 1;
+      const physicalScale = state.scaleMode === 'physical';
+      const sceneOrbitRadius = physicalScale ? physicalOrbitFor(node.body) : node.body.orbitRadius;
+      const sceneRadius = physicalScale ? physicalRadiusFor(node.body) : node.body.scaleRadius;
+      const radiusRatio = sceneRadius / node.body.scaleRadius;
+      for (const visual of node.visuals) visual.object.scale.copy(visual.scale).multiplyScalar(radiusRatio);
       if (node.body.type === 'planet') {
-        setPlanetScenePosition(id, simulationDate, node.body.orbitRadius, node.group.position);
-      } else if (node.body.parent) {
-        node.pivot.rotation.y = direction * ((simDays / Math.abs(orbitDays)) * Math.PI * 2 + bodyPhase(id));
+        setPlanetScenePosition(id, simulationDate, sceneOrbitRadius, node.group.position);
+      } else if (node.body.type === 'moon') {
+        setSatelliteScenePosition(node.body, simulationDate, sceneOrbitRadius, node.group.position);
       }
-      if (node.body.rotationHours) {
+      if (node.body.rotationHours && node.body.type !== 'moon') {
         node.mesh.rotation.y += (delta * state.secondsPerSecond / 3600) * (Math.PI * 2 / Math.abs(node.body.rotationHours)) * Math.sign(node.body.rotationHours);
       }
       if (node.mesh.material.userData.animatedSun) {
         node.mesh.material.uniforms.uTime.value = visualTime;
       }
+      if (node.earthLayers) {
+        node.earthLayers.clouds.rotation.y += delta * 0.0045;
+        node.earthLayers.nightMaterial.uniforms.uSunPosition.value.copy(worldPositions.get('sun'));
+      }
       if (node.marker) {
-        node.marker.material.opacity = id === state.selectedId ? 0.85 + Math.sin(performance.now() * 0.005) * 0.15 : 0;
+        const hideCloseUpMarker = id === state.selectedId && state.viewMode === 'follow';
+        node.marker.material.opacity = id === state.selectedId && !hideCloseUpMarker
+          ? 0.85 + Math.sin(performance.now() * 0.005) * 0.15
+          : 0;
       }
       const selectedBody = bodyMap[state.selectedId] ?? bodyMap.sun;
       const moonInSelectedSystem = node.body.type === 'moon' && node.body.parent === selectedBody.id;
-      node.label.material.opacity = id === state.selectedId
+      const selectedSystemCloseUp = state.viewMode === 'follow'
+        && (id === state.selectedId || node.body.parent === state.selectedId);
+      node.label.material.opacity = selectedSystemCloseUp
+        ? 0
+        : id === state.selectedId
         ? 0.96
         : moonInSelectedSystem
           ? 0.34
@@ -1300,6 +1487,20 @@ function buildSolarScene(mount, options) {
                 ? 0.5
                 : 0.72;
       node.group.getWorldPosition(worldPositions.get(id));
+      if (node.body.type === 'moon') {
+        const parentPosition = worldPositions.get(node.body.parent);
+        if (parentPosition) {
+          node.mesh.lookAt(parentPosition);
+          node.mesh.rotateY(Math.PI / 2);
+        }
+      }
+    }
+    for (const item of orbitLines) {
+      const orbitBody = bodyMap[item.id];
+      const ratio = state.scaleMode === 'physical'
+        ? physicalOrbitFor(orbitBody) / orbitBody.orbitRadius
+        : 1;
+      item.orbit.scale.setScalar(ratio);
     }
     updateSunMotionLine(state.viewMode, state.selectedId);
     updateHelicalTrails(state.viewMode, state.selectedId);
@@ -1329,20 +1530,26 @@ function buildSolarScene(mount, options) {
         ? new THREE.Vector3(-8, 6.5, 15)
         : new THREE.Vector3(selectedBody.scaleRadius * 7 + 7, selectedBody.scaleRadius * 2.2 + 2.4, selectedBody.scaleRadius * 4.4 + 7);
     }
+    controls.minDistance = selectedBody.scaleRadius * (selectedBody.type === 'star' ? 1.68 : 1.18);
     if (state.viewMode === 'follow' && selectedBody.type !== 'star') {
       const sunPosition = worldPositions.get('sun') ?? targetPosition;
       followSunVector.copy(sunPosition).sub(targetPosition).normalize();
       followSideVector.set(-followSunVector.z, 0, followSunVector.x).normalize();
       cameraGoal.copy(targetPosition)
-        .addScaledVector(followSunVector, selectedBody.scaleRadius * 5.6 + 6.2)
-        .addScaledVector(followSideVector, selectedBody.scaleRadius * 2.4 + 3.2);
-      cameraGoal.y += selectedBody.scaleRadius * 1.8 + 2.2;
+        .addScaledVector(followSunVector, selectedBody.scaleRadius * 3.8)
+        .addScaledVector(followSideVector, selectedBody.scaleRadius * 1.45);
+      cameraGoal.y += selectedBody.scaleRadius * 0.72;
+    } else if (state.viewMode === 'follow') {
+      cameraGoal.copy(targetPosition).add(new THREE.Vector3(
+        -selectedBody.scaleRadius * 3.45,
+        selectedBody.scaleRadius * 1.25,
+        selectedBody.scaleRadius * 3.05,
+      ));
     } else {
       cameraGoal.copy(cameraFocusPosition).add(cameraBias);
     }
     lookAtGoal.copy(cameraFocusPosition);
     if (state.viewMode === 'helical') lookAtGoal.z -= selectedBody.type === 'star' ? 11 : 6.5;
-    if (state.viewMode === 'follow' && selectedBody.type === 'star') lookAtGoal.z -= 3;
 
     const cameraTargetChanged = state.selectedId !== lastSelectedId
       || state.viewMode !== lastViewMode
@@ -1361,6 +1568,12 @@ function buildSolarScene(mount, options) {
         currentLook.lerp(lookAtGoal, 1 - Math.pow(0.014, delta));
         controls.target.copy(currentLook);
         cameraTransition -= delta * 1.65;
+        if (cameraTransition <= 0.01) {
+          camera.position.copy(cameraGoal);
+          currentLook.copy(lookAtGoal);
+          controls.target.copy(lookAtGoal);
+          cameraTransition = 0;
+        }
       } else {
         targetDelta.copy(cameraFocusPosition).sub(previousTarget);
         camera.position.add(targetDelta);
@@ -1371,12 +1584,23 @@ function buildSolarScene(mount, options) {
 
     controls.update();
     camera.updateMatrixWorld();
-    const starDepthDrift = rushingMode ? THREE.MathUtils.euclideanModulo(forward * 0.9, 96) : 0;
-    const dustDepthDrift = rushingMode ? THREE.MathUtils.euclideanModulo(forward * 0.58, 78) : 0;
+    const exposureOrbitBody = selectedBody.type === 'planet'
+      ? selectedBody
+      : selectedBody.parent && bodyMap[selectedBody.parent]?.type === 'planet'
+        ? bodyMap[selectedBody.parent]
+        : bodyMap.earth;
+    const observationExposure = state.viewMode === 'follow'
+      ? THREE.MathUtils.clamp(exposureOrbitBody.orbitRadius / bodyMap.earth.orbitRadius, 0.9, 3.4)
+      : 1;
+    renderer.toneMappingExposure = THREE.MathUtils.lerp(
+      renderer.toneMappingExposure,
+      1.05 * observationExposure,
+      1 - Math.pow(0.02, delta),
+    );
+    const starDepthDrift = rushingMode ? THREE.MathUtils.euclideanModulo(forward * 2.4, 120) : 0;
     galaxy.position.copy(camera.position).addScaledVector(backgroundTravelDirection, starDepthDrift);
-    milkyWay.position.copy(camera.position)
-      .addScaledVector(backgroundTravelDirection, dustDepthDrift)
-      .add(backgroundOffset.set(0, -20, -44));
+    catalogStars.position.copy(camera.position);
+    milkyWay.position.copy(camera.position);
     cameraLight.position.copy(camera.position);
     renderer.render(scene, camera);
 
@@ -1447,6 +1671,7 @@ function App() {
   const [playing, setPlaying] = useState(true);
   const [autoFollow, setAutoFollow] = useState(true);
   const [viewMode, setViewMode] = useState(DEFAULT_VIEW_MODE);
+  const [scaleMode, setScaleMode] = useState('visual');
   const [additionalDataOpen, setAdditionalDataOpen] = useState(false);
   const [cameraRevision, setCameraRevision] = useState(0);
   const [telemetry, setTelemetry] = useState({
@@ -1459,6 +1684,18 @@ function App() {
   });
 
   const selectedBody = bodyMap[selectedId] ?? bodyMap.sun;
+  const ephemerisYear = telemetry.date.getUTCFullYear();
+  const ephemerisInRange = ephemerisYear >= 1800 && ephemerisYear <= 2050;
+  const referenceFrame = selectedBody.type === 'planet'
+    ? 'J2000 mean ecliptic'
+    : selectedBody.type === 'moon'
+      ? 'JPL local Laplace/equatorial plane'
+      : 'Heliocentric origin';
+  const ephemerisModel = selectedBody.type === 'planet'
+    ? 'JPL approximate elements'
+    : selectedBody.type === 'moon'
+      ? 'JPL J2000 mean elements'
+      : 'Scene origin';
   const selectedSpeed = simulationSpeeds[speedIndex];
   const selectedOrbitBody = selectedBody.type === 'planet'
     ? selectedBody
@@ -1480,7 +1717,6 @@ function App() {
   const switchViewMode = (mode) => {
     setViewMode(mode);
     setAutoFollow(true);
-    if (mode === 'follow' && selectedId === 'sun') setSelectedId('jupiter');
     setCameraRevision((value) => value + 1);
   };
   const timelineMarks = useMemo(() => {
@@ -1500,6 +1736,7 @@ function App() {
     playing,
     autoFollow,
     viewMode,
+    scaleMode,
     cameraRevision,
   };
 
@@ -1545,7 +1782,7 @@ function App() {
       <header className="top-bar">
         <div className="brand-block">
           <span className="brand-mark" aria-hidden="true" />
-          <h1>solar rushing</h1>
+          <h1>Solar Rush</h1>
         </div>
         <div className="time-strip">
           <div>
@@ -1568,7 +1805,7 @@ function App() {
               {playing ? 'Ⅱ' : '▶'}
             </button>
           </div>
-          <label>
+          <label className="speed-control">
             <span>Sim Speed</span>
             <select value={speedIndex} onChange={(event) => setSpeedIndex(Number(event.target.value))}>
               {simulationSpeeds.map((item, index) => (
@@ -1578,13 +1815,12 @@ function App() {
               ))}
             </select>
           </label>
-          <button type="button" className="menu-button" aria-label="menu">☰</button>
         </div>
       </header>
 
       <aside className="left-panel glass-panel">
         <div className="panel-title">
-          <span>Celestial Index</span>
+          <span>Celestial Bodies</span>
           <strong>{bodies.length}</strong>
         </div>
         <label className="search-box">
@@ -1639,21 +1875,6 @@ function App() {
         )}
       </aside>
 
-      <div className="left-tool-stack" aria-label="scene tools">
-        <div className="tool-cluster">
-          <button type="button">⌖</button>
-          <button type="button">✋</button>
-          <button type="button">✥</button>
-          <button type="button">⛶</button>
-        </div>
-        <div className="tool-cluster">
-          <button type="button">⌖</button>
-          <button type="button">＋</button>
-          <button type="button">−</button>
-          <button type="button" onClick={() => setCameraRevision((value) => value + 1)}>↻</button>
-        </div>
-      </div>
-
       <aside className="right-panel glass-panel">
         <div className="body-hero">
           <span className="body-preview" style={{ background: selectedBody.color }} />
@@ -1668,6 +1889,10 @@ function App() {
           <p>
             {viewModeDescriptions[viewMode]}
           </p>
+          <div className={`science-status ${ephemerisInRange ? '' : 'warning'}`}>
+            <span>{ephemerisInRange ? 'EPHEMERIS IN RANGE' : 'EPHEMERIS OUT OF RANGE'}</span>
+            <small>{scaleMode === 'physical' ? '统一比例：1 场景单位 = 5000 万 km。' : '视觉比例：尺寸与距离分别压缩。'}</small>
+          </div>
         </div>
 
         <div className="detail-tabs">
@@ -1724,12 +1949,27 @@ function App() {
             <div><span>Mass</span><strong>{selectedBody.mass}</strong></div>
             <div><span>Moons</span><strong>{selectedBody.moons.length}</strong></div>
             <div><span>Visual Magnitude</span><strong>{selectedBody.type === 'star' ? '-26.74' : '—'}</strong></div>
-            <div><span>Right Ascension</span><strong>{pseudoSkyCoordinate(selectedBody, 'ra')}</strong></div>
-            <div><span>Declination</span><strong>{pseudoSkyCoordinate(selectedBody, 'dec')}</strong></div>
+            <div><span>Reference Frame</span><strong>{referenceFrame}</strong></div>
+            <div><span>Position Model</span><strong>{ephemerisModel}</strong></div>
+            <div><span>Scale Model</span><strong>{scaleMode === 'physical' ? 'Unified physical ratio' : 'Compressed visual scale'}</strong></div>
+            <div><span>Star Catalogue</span><strong>Hipparcos bright subset / ICRS</strong></div>
+            <div><span>Lighting</span><strong>Geometric eclipse + ring shadows</strong></div>
           </div>
         )}
 
         <div className="follow-control">
+          <label className="toggle-row">
+            <input
+              type="checkbox"
+              checked={scaleMode === 'physical'}
+              onChange={(event) => {
+                setScaleMode(event.target.checked ? 'physical' : 'visual');
+                setViewMode('orbit');
+                setCameraRevision((value) => value + 1);
+              }}
+            />
+            <span>True physical scale (1 unit = 50M km)</span>
+          </label>
           <label className="toggle-row">
             <input type="checkbox" checked={autoFollow} onChange={(event) => setAutoFollow(event.target.checked)} />
             <span>Keep selected body centered</span>
@@ -1746,7 +1986,7 @@ function App() {
           ◎ Orbit View
         </button>
         <button type="button" className={viewMode === 'helical' ? 'active' : ''} onClick={() => switchViewMode('helical')}>
-          ◈ 3D Spiral
+          ◈ Artistic Spiral
         </button>
         <button type="button" className={viewMode === 'follow' ? 'active' : ''} onClick={() => switchViewMode('follow')}>
           △ Follow View
