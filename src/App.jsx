@@ -1,6 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import {
+  Body as AstronomyBody,
+  HelioVector,
+  RotateVector,
+  Rotation_EQJ_ECL,
+} from 'astronomy-engine';
 import { bodies, bodyMap, planetEphemerisElements } from './solarData.js';
 import { brightStarCatalog, satelliteMeanElements } from './astronomyData.js';
 import { getBodyDetails, textureForBody } from './bodyDetails.js';
@@ -12,6 +18,7 @@ const BACKGROUND_TRAVEL_Z = -SYSTEM_TRAVEL_Z;
 const START_DATE = new Date();
 const PHYSICAL_KM_PER_UNIT = 50_000_000;
 const PHYSICAL_ORBIT_CAMERA_BIAS = new THREE.Vector3(0, 135, 125);
+const EQJ_TO_ECL = Rotation_EQJ_ECL();
 const assetUrl = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
 const simulationSpeeds = [
   { label: '1.00x', secondsPerSecond: 1 },
@@ -92,6 +99,17 @@ const trailColors = {
   saturn: '#f0d08a',
   uranus: '#68f1ff',
   neptune: '#4f7cff',
+};
+
+const astronomyPlanetBodies = {
+  mercury: AstronomyBody.Mercury,
+  venus: AstronomyBody.Venus,
+  earth: AstronomyBody.Earth,
+  mars: AstronomyBody.Mars,
+  jupiter: AstronomyBody.Jupiter,
+  saturn: AstronomyBody.Saturn,
+  uranus: AstronomyBody.Uranus,
+  neptune: AstronomyBody.Neptune,
 };
 
 function formatNumber(value, unit = '', locale = 'zh-CN') {
@@ -198,6 +216,13 @@ function solveEccentricAnomaly(meanAnomaly, eccentricity) {
 function setPlanetScenePosition(id, date, sceneSemiMajorAxis, out, orbitEccentricAnomaly = null) {
   const elements = getPlanetElementsAtDate(id, date);
   if (!elements) return out.set(0, 0, 0);
+  const astronomyBody = astronomyPlanetBodies[id];
+  if (astronomyBody && orbitEccentricAnomaly === null) {
+    const equatorial = HelioVector(astronomyBody, date);
+    const ecliptic = RotateVector(EQJ_TO_ECL, equatorial);
+    const sceneScale = sceneSemiMajorAxis / elements.a;
+    return out.set(ecliptic.x * sceneScale, ecliptic.z * sceneScale, -ecliptic.y * sceneScale);
+  }
   const meanAnomalyDegrees = THREE.MathUtils.euclideanModulo(
     elements.meanLongitude - elements.longitudePerihelion + 180,
     360,
@@ -599,34 +624,58 @@ function createCatalogStarField(starTexture) {
 }
 
 function createMilkyWayBand(starTexture) {
-  const geometry = new THREE.BufferGeometry();
+  // Galactic coordinates transformed into the J2000 equatorial frame. This
+  // keeps the bright Galactic center and plane aligned with the catalogue sky.
+  const galacticToScene = (longitude, latitude, radius, target) => {
+    const cosLatitude = Math.cos(latitude);
+    const gx = radius * cosLatitude * Math.cos(longitude);
+    const gy = radius * cosLatitude * Math.sin(longitude);
+    const gz = radius * Math.sin(latitude);
+    const eqX = -0.0548755604 * gx + 0.4941094279 * gy - 0.8676661490 * gz;
+    const eqY = -0.8734370902 * gx - 0.4448296300 * gy - 0.1980763734 * gz;
+    const eqZ = -0.4838350155 * gx + 0.7469822445 * gy + 0.4559837762 * gz;
+    target.push(eqX, eqZ, -eqY);
+  };
+  let seed = 0x7f4a7c15;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
   const positions = [];
   const colors = [];
-  for (let i = 0; i < 28_000; i += 1) {
-    const longitude = Math.random() * Math.PI * 2;
-    const latitudeSpread = Math.pow(Math.random(), 2.8) * 0.18;
-    const latitude = (Math.random() > 0.5 ? 1 : -1) * latitudeSpread
-      + Math.sin(longitude * 2.0) * 0.018;
-    const radius = THREE.MathUtils.randFloat(175, 220);
-    const cosLatitude = Math.cos(latitude);
-    positions.push(
-      radius * cosLatitude * Math.cos(longitude),
-      radius * Math.sin(latitude),
-      radius * cosLatitude * Math.sin(longitude),
-    );
-    const centerGlow = 0.62 + Math.pow(Math.max(0, Math.cos(longitude)), 4) * 0.48;
-    const dustVariation = 0.68 + Math.sin(longitude * 13.0 + latitude * 80.0) * 0.16;
-    const warmth = THREE.MathUtils.randFloat(0.72, 1.0) * centerGlow * dustVariation;
-    colors.push(warmth * 0.9, warmth * 0.84, warmth);
+  for (let i = 0; i < 42_000; i += 1) {
+    // Concentrate stars toward the Galactic center while retaining the full band.
+    const centerBiased = random() < 0.34;
+    const longitude = centerBiased
+      ? (random() - random()) * 0.72
+      : random() * Math.PI * 2 - Math.PI;
+    const centerStrength = Math.exp(-Math.pow(longitude / 0.62, 2));
+    const bandWidth = 0.035 + centerStrength * 0.115;
+    const latitude = (random() - random()) * bandWidth
+      + Math.sin(longitude * 2.0 + 0.5) * 0.012;
+    const radius = 182 + random() * 34;
+    galacticToScene(longitude, latitude, radius, positions);
+
+    // A dim mid-plane creates the split dust lane; longitudinal modulation
+    // breaks the synthetic uniform stripe into recognizable star-cloud patches.
+    const dustLane = 0.34 + 0.66 * (1 - Math.exp(-Math.pow(latitude / 0.018, 2)));
+    const cloud = 0.68
+      + 0.18 * Math.sin(longitude * 5.0 + 0.7)
+      + 0.12 * Math.sin(longitude * 17.0 - latitude * 90.0);
+    const brightness = Math.max(0.12, (0.52 + centerStrength * 0.68) * dustLane * cloud)
+      * (0.72 + random() * 0.34);
+    const warmCenter = centerStrength * 0.2;
+    colors.push(brightness, brightness * (0.9 + warmCenter), brightness * (1.08 - warmCenter));
   }
+  const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   const material = new THREE.PointsMaterial({
     map: starTexture,
-    size: 0.3,
+    size: 0.52,
     vertexColors: true,
     transparent: true,
-    opacity: 0.48,
+    opacity: 0.7,
     depthWrite: false,
     alphaTest: 0.02,
     blending: THREE.AdditiveBlending,
@@ -634,18 +683,16 @@ function createMilkyWayBand(starTexture) {
   });
   const glowMaterial = new THREE.PointsMaterial({
     map: starTexture,
-    size: 1.35,
+    size: 1.9,
     vertexColors: true,
     transparent: true,
-    opacity: 0.1,
+    opacity: 0.17,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });
   const band = new THREE.Group();
   band.add(new THREE.Points(geometry, glowMaterial), new THREE.Points(geometry, material));
-  band.rotation.z = THREE.MathUtils.degToRad(-58);
-  band.rotation.x = THREE.MathUtils.degToRad(24);
   return band;
 }
 
@@ -1840,6 +1887,15 @@ function BodyButton({ body, selectedId, onSelect, locale, language, expanded = f
   );
 }
 
+function AtmosphereIcon({ className = '' }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6.2 15.8h10.9a3.4 3.4 0 0 0 .2-6.8A5.7 5.7 0 0 0 6.6 7.4a4.2 4.2 0 0 0-.4 8.4Z" />
+      <path d="M3.5 18.5h11.2M7.5 21h9" />
+    </svg>
+  );
+}
+
 function App() {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
@@ -1853,6 +1909,7 @@ function App() {
   const [language, setLanguage] = useState(() => localStorage.getItem('solar-rush-language') || 'zh');
   const [detailTab, setDetailTab] = useState('overview');
   const [additionalDataOpen, setAdditionalDataOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [cameraRevision, setCameraRevision] = useState(0);
   const [telemetry, setTelemetry] = useState({
     simDays: 0,
@@ -1875,7 +1932,7 @@ function App() {
       ? 'JPL local Laplace/equatorial plane'
       : 'Heliocentric origin';
   const ephemerisModel = selectedBody.type === 'planet'
-    ? 'JPL approximate elements'
+    ? 'Astronomy Engine VSOP87 / J2000'
     : selectedBody.type === 'moon'
       ? 'JPL J2000 mean elements'
       : 'Scene origin';
@@ -1901,6 +1958,7 @@ function App() {
     setViewMode(mode);
     setAutoFollow(true);
     setCameraRevision((value) => value + 1);
+    setMobileMenuOpen(false);
   };
   const changeLanguage = (nextLanguage) => {
     setLanguage(nextLanguage);
@@ -1963,7 +2021,7 @@ function App() {
   });
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${mobileMenuOpen ? 'mobile-menu-open' : ''}`}>
       <section ref={mountRef} className="space-stage" aria-label={language === 'zh' ? '3D 太阳系模拟器' : '3D Solar System Simulator'} />
 
       <header className="top-bar">
@@ -1971,6 +2029,22 @@ function App() {
           <span className="brand-mark" aria-hidden="true" />
           <h1>Solar Rush</h1>
         </div>
+        <button
+          type="button"
+          className="mobile-menu-toggle"
+          aria-label={language === 'zh' ? (mobileMenuOpen ? '关闭菜单' : '打开菜单') : (mobileMenuOpen ? 'Close menu' : 'Open menu')}
+          aria-expanded={mobileMenuOpen}
+          onClick={() => setMobileMenuOpen((value) => !value)}
+        >
+          <span aria-hidden="true">
+            {mobileMenuOpen ? '×' : (
+              <svg className="mobile-menu-icon" viewBox="0 0 24 24">
+                <path d="M7 7h10M5 12h14M8 17h8" />
+              </svg>
+            )}
+          </span>
+          {language === 'zh' ? '菜单' : 'Menu'}
+        </button>
         <div className="time-strip">
           <div>
             <span>UTC</span>
@@ -2028,6 +2102,7 @@ function App() {
               setSelectedId(id);
               setAutoFollow(true);
               setCameraRevision((value) => value + 1);
+              setMobileMenuOpen(false);
             }} />
           </div>
         )}
@@ -2044,6 +2119,7 @@ function App() {
                     setSelectedId(id);
                     setAutoFollow(true);
                     setCameraRevision((value) => value + 1);
+                    setMobileMenuOpen(false);
                   }} />
                 )}
                 {visibleMoons.length > 0 && (
@@ -2053,6 +2129,7 @@ function App() {
                         setSelectedId(id);
                         setAutoFollow(true);
                         setCameraRevision((value) => value + 1);
+                        setMobileMenuOpen(false);
                       }} />
                     ))}
                   </div>
@@ -2088,7 +2165,14 @@ function App() {
 
         <div className="detail-tabs">
           {['overview', 'physical', 'composition', 'atmosphere'].map((tab) => (
-            <button key={tab} type="button" className={detailTab === tab ? 'active' : ''} onClick={() => setDetailTab(tab)}>
+            <button
+              key={tab}
+              type="button"
+              className={detailTab === tab ? 'active' : ''}
+              aria-pressed={detailTab === tab}
+              onClick={() => setDetailTab(tab)}
+            >
+              {tab === 'atmosphere' && <AtmosphereIcon className="tab-atmosphere-icon" />}
               {copy[tab]}
             </button>
           ))}
@@ -2103,7 +2187,7 @@ function App() {
         {detailTab === 'composition' && <div className="detail-copy"><p>{bodyDetails.composition[language === 'zh' ? 1 : 0]}</p><a href={bodyDetails.source} target="_blank" rel="noreferrer">{copy.source} ↗</a></div>}
         {detailTab === 'atmosphere' && (
           <div className="detail-copy atmosphere-detail">
-            <span className="detail-icon atmosphere-icon" aria-hidden="true">◌</span>
+            <span className="detail-icon atmosphere-icon" aria-hidden="true"><AtmosphereIcon /></span>
             <p>{bodyDetails.atmosphere[language === 'zh' ? 1 : 0]}</p>
             <a href={bodyDetails.source} target="_blank" rel="noreferrer">{copy.source} ↗</a>
           </div>
