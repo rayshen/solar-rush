@@ -12,6 +12,8 @@ import { brightStarCatalog, satelliteMeanElements } from './astronomyData.js';
 import { getBodyDetails, textureForBody } from './bodyDetails.js';
 
 const DAY_MS = 86_400_000;
+const MAX_UI_TIME_UPDATE_INTERVAL_MS = 1_000;
+const MIN_UI_TIME_UPDATE_INTERVAL_MS = 16;
 const J2000_MS = Date.UTC(2000, 0, 1, 12);
 const SYSTEM_TRAVEL_Z = 1;
 const BACKGROUND_TRAVEL_Z = -SYSTEM_TRAVEL_Z;
@@ -21,17 +23,17 @@ const PHYSICAL_ORBIT_CAMERA_BIAS = new THREE.Vector3(0, 135, 125);
 const EQJ_TO_ECL = Rotation_EQJ_ECL();
 const assetUrl = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
 const simulationSpeeds = [
-  { label: '1.00x', secondsPerSecond: 1 },
-  { label: '60x', secondsPerSecond: 60 },
-  { label: '1h/s', secondsPerSecond: 3600 },
-  { label: '1d/s', secondsPerSecond: 86400 },
-  { label: '7d/s', secondsPerSecond: 604_800 },
-  { label: '30d/s', secondsPerSecond: 2_592_000 },
-  { label: '1y/s', secondsPerSecond: 31_557_600 },
-  { label: '10y/s', secondsPerSecond: 315_576_000 },
-  { label: 'Orbit/10s', orbitSeconds: 10 },
+  { label: 'Adaptive orbit', adaptiveOrbit: true },
+  { label: '1s/s', multiplier: '1×', secondsPerSecond: 1 },
+  { label: '1m/s', multiplier: '60×', secondsPerSecond: 60 },
+  { label: '1h/s', multiplier: '3,600×', secondsPerSecond: 3600 },
+  { label: '1d/s', multiplier: '86,400×', secondsPerSecond: 86400 },
+  { label: '7d/s', multiplier: '604,800×', secondsPerSecond: 604_800 },
+  { label: '30d/s', multiplier: '2,592,000×', secondsPerSecond: 2_592_000 },
+  { label: '1y/s', multiplier: '31,557,600×', secondsPerSecond: 31_557_600 },
+  { label: '10y/s', multiplier: '315,576,000×', secondsPerSecond: 315_576_000 },
 ];
-const DEFAULT_SPEED_INDEX = simulationSpeeds.findIndex(({ label }) => label === '7d/s');
+const DEFAULT_SPEED_INDEX = simulationSpeeds.findIndex(({ adaptiveOrbit }) => adaptiveOrbit);
 const DEFAULT_VIEW_MODE = 'helical';
 
 const viewModeLabels = {
@@ -131,11 +133,25 @@ function formatDistance(value) {
 
 function formatLunarDate(date) {
   try {
-    return new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {
+    const parts = new Intl.DateTimeFormat('zh-CN-u-ca-chinese', {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
-    }).format(date);
+      timeZone: 'Asia/Shanghai',
+    }).formatToParts(date);
+    const yearName = parts.find(({ type }) => type === 'yearName')?.value;
+    const month = parts.find(({ type }) => type === 'month')?.value;
+    const day = Number(parts.find(({ type }) => type === 'day')?.value);
+    if (!yearName || !month || !Number.isInteger(day) || day < 1 || day > 30) {
+      throw new Error('Unsupported Chinese calendar parts');
+    }
+
+    const dayNames = [
+      '初一', '初二', '初三', '初四', '初五', '初六', '初七', '初八', '初九', '初十',
+      '十一', '十二', '十三', '十四', '十五', '十六', '十七', '十八', '十九', '二十',
+      '廿一', '廿二', '廿三', '廿四', '廿五', '廿六', '廿七', '廿八', '廿九', '三十',
+    ];
+    return `${yearName}年${month}${dayNames[day - 1]}`;
   } catch {
     return '当前浏览器不支持农历格式';
   }
@@ -149,18 +165,6 @@ function formatElapsed(seconds) {
   if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
   if (minutes > 0) return `${minutes}m ${secs}s`;
   return `${secs}s`;
-}
-
-function addDays(date, days) {
-  return new Date(date.getTime() + days * DAY_MS);
-}
-
-function formatShortDate(date) {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    timeZone: 'UTC',
-  }).format(date);
 }
 
 function estimateEscapeVelocity(body) {
@@ -756,23 +760,22 @@ function createSunMaterial() {
 
       void main() {
         vec3 observedSurface = texture2D(uSurfaceMap, vUv).rgb;
-        vec3 surfaceDetail = pow(max(observedSurface, vec3(0.015)), vec3(0.55));
-        vec3 flow = vec3(uTime * 0.035, -uTime * 0.018, uTime * 0.024);
-        float broad = fbm(vSurfacePosition * 3.8 + flow);
-        float cells = fbm(vSurfacePosition * 12.0 - flow * 1.7);
-        float filaments = 1.0 - smoothstep(0.035, 0.2, abs(fbm(vSurfacePosition * 7.0 + flow * 2.2) - 0.52));
-        float heat = clamp(broad * 0.82 + cells * 0.42 + filaments * 0.3, 0.0, 1.35);
-        float granules = smoothstep(0.48, 0.78, cells + filaments * 0.28);
+        float observedLuma = dot(observedSurface, vec3(0.2126, 0.7152, 0.0722));
+        vec3 flow = vec3(uTime * 0.012, -uTime * 0.006, uTime * 0.009);
+        float broad = fbm(vSurfacePosition * 5.2 + flow);
+        float cells = fbm(vSurfacePosition * 28.0 - flow * 1.4);
+        float fineCells = fbm(vSurfacePosition * 58.0 + flow * 1.8);
+        float activity = smoothstep(0.3, 0.72, 1.0 - observedLuma);
+        float granulation = (cells - 0.5) * 0.13 + (fineCells - 0.5) * 0.07;
 
-        vec3 color = vec3(0.82, 0.075, 0.002) + surfaceDetail * vec3(0.92, 0.32, 0.055);
-        color *= mix(0.88, 1.28, smoothstep(0.24, 1.02, heat));
-        color += vec3(1.55, 0.72, 0.08) * granules * 0.82;
-        color = mix(color, vec3(1.72, 0.88, 0.2), filaments * 0.28);
+        vec3 solarOrange = vec3(1.26, 0.55, 0.09);
+        vec3 color = solarOrange * (0.94 + broad * 0.13 + granulation);
+        color *= 1.0 - activity * 0.24;
+        color = mix(color, vec3(0.72, 0.105, 0.012), activity * 0.22);
 
         float facing = clamp(dot(normalize(vWorldNormal), normalize(vViewDirection)), 0.0, 1.0);
-        float limb = pow(facing, 0.42);
-        color *= mix(0.88, 1.12, limb);
-        color += vec3(1.25, 0.42, 0.015) * filaments * 0.24;
+        float limb = pow(facing, 0.32);
+        color *= mix(0.82, 1.06, limb);
         gl_FragColor = vec4(color, 1.0);
       }
     `,
@@ -1392,23 +1395,23 @@ function buildSolarScene(mount, options) {
     if (body.id === 'sun') {
       const halo = new THREE.Sprite(new THREE.SpriteMaterial({
         map: trailGlowTexture,
-        color: '#ff7a12',
+        color: '#ff8a24',
         transparent: true,
-        opacity: 0.68,
+        opacity: 0.3,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       }));
-      halo.scale.setScalar(body.scaleRadius * 4.8);
+      halo.scale.setScalar(body.scaleRadius * 4.2);
       halo.renderOrder = -1;
       group.add(halo);
       const glow = new THREE.Mesh(
         new THREE.SphereGeometry(body.scaleRadius * 1.2, 96, 48),
-        createRimGlowMaterial('#ffb52e', 0.76, 1.55),
+        createRimGlowMaterial('#ffb23e', 0.4, 1.7),
       );
       group.add(glow);
       const corona = new THREE.Mesh(
         new THREE.SphereGeometry(body.scaleRadius * 1.48, 96, 48),
-        createRimGlowMaterial('#ff6a0a', 0.16, 2.45),
+        createRimGlowMaterial('#ff6f16', 0.08, 2.7),
       );
       group.add(corona);
     }
@@ -1867,7 +1870,7 @@ function buildSolarScene(mount, options) {
   };
 }
 
-function BodyButton({ body, selectedId, onSelect, locale, language, expanded = false, nested = false }) {
+function BodyButton({ body, selectedId, onSelect, locale, language, nested = false }) {
   const parent = body.parent ? bodyMap[body.parent] : null;
   return (
     <button
@@ -1875,13 +1878,13 @@ function BodyButton({ body, selectedId, onSelect, locale, language, expanded = f
       className={`body-row ${nested ? 'nested' : ''} ${selectedId === body.id ? 'selected' : ''}`}
       onClick={() => onSelect(body.id)}
     >
-      <span className="body-dot body-texture" style={{ backgroundImage: `url(${textureForBody(body.id)})` }} />
+      <span className={`body-dot body-texture body-${body.id}`} style={{ backgroundImage: `url(${textureForBody(body.id)})` }} />
       <span>
         <strong>{language === 'zh' ? body.zh : body.name}</strong>
         <small>{language === 'zh' ? body.name : body.zh}</small>
       </span>
       <em>
-        {expanded ? '⌄' : body.type === 'moon' ? (language === 'zh' ? parent?.zh : parent?.name) : body.type === 'star' ? (language === 'zh' ? '中心' : 'center') : formatDistance(body.distanceKm)}
+        {body.type === 'moon' ? (language === 'zh' ? parent?.zh : parent?.name) : body.type === 'star' ? (language === 'zh' ? '中心' : 'center') : formatDistance(body.distanceKm)}
       </em>
     </button>
   );
@@ -1937,14 +1940,22 @@ function App() {
       ? 'JPL J2000 mean elements'
       : 'Scene origin';
   const selectedSpeed = simulationSpeeds[speedIndex];
-  const selectedOrbitBody = selectedBody.type === 'planet'
-    ? selectedBody
-    : selectedBody.parent && bodyMap[selectedBody.parent]?.type === 'planet'
-      ? bodyMap[selectedBody.parent]
-      : bodyMap.earth;
-  const secondsPerSecond = selectedSpeed.orbitSeconds
-    ? Math.max(1, Math.abs(selectedOrbitBody.orbitDays || 365.256) * 86_400 / selectedSpeed.orbitSeconds)
+  const selectedOrbitBody = selectedBody.orbitDays ? selectedBody : bodyMap.earth;
+  const adaptiveOrbitDuration = THREE.MathUtils.clamp(
+    30 * Math.sqrt(Math.abs(selectedOrbitBody.orbitDays || 365.256) / 365.256),
+    30,
+    180,
+  );
+  const secondsPerSecond = selectedSpeed.adaptiveOrbit
+    ? Math.max(1, Math.abs(selectedOrbitBody.orbitDays || 365.256) * 86_400 / adaptiveOrbitDuration)
     : selectedSpeed.secondsPerSecond;
+  const adaptiveSpeedLabel = selectedBody.orbitDays
+    ? language === 'zh'
+      ? `自适应公转 · ${selectedOrbitBody.zh}约${Math.round(adaptiveOrbitDuration)}s/周`
+      : `Adaptive orbit · ${selectedOrbitBody.name} ~${Math.round(adaptiveOrbitDuration)}s/orbit`
+    : language === 'zh'
+      ? '太阳系演化 · 地球年基准'
+      : 'Solar System evolution · Earth-year reference';
   const visibleBodies = useMemo(() => {
     const normalizedFilter = filter.trim().toLowerCase();
     return bodies.filter((body) => {
@@ -1964,16 +1975,38 @@ function App() {
     setLanguage(nextLanguage);
     localStorage.setItem('solar-rush-language', nextLanguage);
   };
-  const timelineMarks = useMemo(() => {
-    return Array.from({ length: 7 }, (_, index) => {
-      const offset = index - 3;
+  const timeline = useMemo(() => {
+    const year = telemetry.date.getUTCFullYear();
+    const yearStart = Date.UTC(year, 0, 1);
+    const nextYearStart = Date.UTC(year + 1, 0, 1);
+    const progress = ((telemetry.date.getTime() - yearStart) / (nextYearStart - yearStart)) * 100;
+    const monthFormatter = new Intl.DateTimeFormat(locale, {
+      month: language === 'zh' ? 'numeric' : 'short',
+      timeZone: 'UTC',
+    });
+    const marks = Array.from({ length: 12 }, (_, index) => {
+      const monthStart = Date.UTC(year, index, 1);
       return {
-        label: formatShortDate(addDays(telemetry.date, offset)),
-        left: `${(index / 6) * 100}%`,
-        active: offset === 0,
+        label: language === 'zh'
+          ? `${index + 1}月`
+          : monthFormatter.format(new Date(monthStart)),
+        left: `${((monthStart - yearStart) / (nextYearStart - yearStart)) * 100}%`,
+        active: index === telemetry.date.getUTCMonth(),
       };
     });
-  }, [telemetry.date]);
+    marks.push({
+      label: language === 'zh' ? `${year + 1}年` : `${year + 1}`,
+      left: '100%',
+      active: false,
+      yearEnd: true,
+    });
+    return {
+      year,
+      yearLabel: language === 'zh' ? `${year}年` : `${year}`,
+      progress: Math.min(100, Math.max(0, progress)),
+      marks,
+    };
+  }, [language, locale, telemetry.date]);
 
   stateRef.current = {
     selectedId,
@@ -1987,26 +2020,38 @@ function App() {
 
   useEffect(() => {
     if (!mountRef.current) return undefined;
+    let lastUiUpdate = -Infinity;
+    let lastPlaying = stateRef.current.playing;
     const scene = buildSolarScene(mountRef.current, {
       getState: () => stateRef.current,
       onTick: (nextTelemetry) => {
-        setTelemetry((prev) => {
-          if (Math.floor(prev.elapsedSeconds) === Math.floor(nextTelemetry.elapsedSeconds)) return prev;
-          return nextTelemetry;
-        });
+        const now = performance.now();
+        const playingChanged = stateRef.current.playing !== lastPlaying;
+        const oneSimulationDayInterval = (DAY_MS / stateRef.current.secondsPerSecond);
+        const updateInterval = Math.min(
+          MAX_UI_TIME_UPDATE_INTERVAL_MS,
+          Math.max(MIN_UI_TIME_UPDATE_INTERVAL_MS, oneSimulationDayInterval),
+        );
+        if (!playingChanged && now - lastUiUpdate < updateInterval) return;
+        lastUiUpdate = now;
+        lastPlaying = stateRef.current.playing;
+        setTelemetry(nextTelemetry);
       },
     });
     return () => scene.dispose();
   }, []);
 
+  const showTimeOfDay = secondsPerSecond < 86_400;
   const beijingFormatter = new Intl.DateTimeFormat(locale, {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
+    ...(showTimeOfDay && {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }),
     hour12: false,
   });
   const utcFormatter = new Intl.DateTimeFormat(locale, {
@@ -2014,9 +2059,11 @@ function App() {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
+    ...(showTimeOfDay && {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }),
     hour12: false,
   });
 
@@ -2071,7 +2118,9 @@ function App() {
             <select value={speedIndex} onChange={(event) => setSpeedIndex(Number(event.target.value))}>
               {simulationSpeeds.map((item, index) => (
                 <option value={index} key={item.label}>
-                  {item.label}
+                  {item.adaptiveOrbit
+                    ? adaptiveSpeedLabel
+                    : `${item.label} · ${item.multiplier}`}
                 </option>
               ))}
             </select>
@@ -2115,7 +2164,7 @@ function App() {
             return (
               <div className="tree-node" key={planet.id}>
                 {planetVisible && (
-                  <BodyButton body={planet} selectedId={selectedId} language={language} locale={locale} expanded={planet.moons.length > 0} onSelect={(id) => {
+                  <BodyButton body={planet} selectedId={selectedId} language={language} locale={locale} onSelect={(id) => {
                     setSelectedId(id);
                     setAutoFollow(true);
                     setCameraRevision((value) => value + 1);
@@ -2145,7 +2194,7 @@ function App() {
 
       <aside className="right-panel glass-panel">
         <div className="body-hero">
-          <span className="body-preview body-texture" style={{ backgroundImage: `url(${textureForBody(selectedBody.id)})` }} />
+          <span className={`body-preview body-texture body-${selectedBody.id}`} style={{ backgroundImage: `url(${textureForBody(selectedBody.id)})` }} />
           <div>
             <strong>{language === 'zh' ? selectedBody.zh : selectedBody.name}</strong>
             <small>{language === 'zh' ? selectedBody.name : selectedBody.zh}</small>
@@ -2268,10 +2317,6 @@ function App() {
         </div>
       </aside>
 
-      <div className="center-time-chip">
-        {utcFormatter.format(telemetry.date)} UTC
-      </div>
-
       <div className="view-switcher">
         <button type="button" className={viewMode === 'orbit' ? 'active' : ''} onClick={() => switchViewMode('orbit')}>
           ◎ {copy.orbitView}
@@ -2286,22 +2331,29 @@ function App() {
 
       <footer className="bottom-bar">
         <div className="timeline">
-          <span>{copy.elapsed} {formatElapsed(telemetry.elapsedSeconds)}</span>
-          <div className="track">
+          <span className="timeline-summary">
+            <strong>{timeline.yearLabel}</strong>
+            <small>{copy.elapsed} {formatElapsed(telemetry.elapsedSeconds)}</small>
+          </span>
+          <div className="track" key={timeline.year}>
             <div className="tick-rail">
-              {Array.from({ length: 73 }, (_, index) => (
+              {timeline.marks.map((mark, index) => (
                 <span
-                  key={index}
-                  className={index % 12 === 0 ? 'major' : ''}
-                  style={{ left: `${(index / 72) * 100}%` }}
+                  key={mark.label}
+                  className={index % 3 === 0 || mark.yearEnd ? 'major' : ''}
+                  style={{ left: mark.left }}
                 />
               ))}
             </div>
-            <i style={{ width: '50%' }} />
-            <b style={{ left: '50%' }} />
+            <i style={{ width: `${timeline.progress}%` }} />
+            <b style={{ left: `${timeline.progress}%` }} />
             <div className="timeline-labels">
-              {timelineMarks.map((mark) => (
-                <span key={mark.label} className={mark.active ? 'active' : ''} style={{ left: mark.left }}>
+              {timeline.marks.map((mark) => (
+                <span
+                  key={mark.label}
+                  className={`${mark.active ? 'active' : ''} ${mark.yearEnd ? 'year-end' : ''}`}
+                  style={{ left: mark.left }}
+                >
                   {mark.label}
                 </span>
               ))}
