@@ -46,9 +46,19 @@ Focuses on the selected body and its local system, reducing unrelated orbital no
 
 ## Current Implementation
 
-The screenshot below was captured from the current version deployed on GitHub Pages.
+The screenshots below were captured from the current development version of all three observation modes.
 
-![Current Solar Rush implementation](docs/images/current-implementation.jpg)
+### Orbit View
+
+![Current Solar Rush Orbit View](docs/images/orbit-view.jpg)
+
+### Artistic Spiral
+
+![Current Solar Rush Artistic Spiral](docs/images/artistic-spiral-view.jpg)
+
+### Follow View
+
+![Current Solar Rush Follow View](docs/images/follow-view.jpg)
 
 ## Tech Stack
 

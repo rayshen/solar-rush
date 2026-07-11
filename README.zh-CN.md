@@ -46,9 +46,19 @@ Solar Rush 最初的目的，是让人能够从上帝视角观察太阳系——
 
 ## 当前实现
 
-下面的截图来自当前部署在 GitHub Pages 上的版本。
+下面的截图展示了当前开发版本的三种观察模式。
 
-![Solar Rush 当前实现](docs/images/current-implementation.jpg)
+### Orbit View
+
+![Solar Rush 当前轨道视图](docs/images/orbit-view.jpg)
+
+### Artistic Spiral
+
+![Solar Rush 当前艺术螺旋视图](docs/images/artistic-spiral-view.jpg)
+
+### Follow View
+
+![Solar Rush 当前跟随视图](docs/images/follow-view.jpg)
 
 ## 技术栈
 
