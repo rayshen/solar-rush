@@ -118,7 +118,6 @@ p {
   line-height: 1;
   letter-spacing: 0.02em;
   text-overflow: ellipsis;
-  text-transform: lowercase;
   white-space: nowrap;
 }
 
