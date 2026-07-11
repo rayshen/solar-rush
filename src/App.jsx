@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { bodies, bodyMap, planetEphemerisElements } from './solarData.js';
 import { brightStarCatalog, satelliteMeanElements } from './astronomyData.js';
+import { getBodyDetails, textureForBody } from './bodyDetails.js';
 
 const DAY_MS = 86_400_000;
 const J2000_MS = Date.UTC(2000, 0, 1, 12);
@@ -10,6 +11,8 @@ const SYSTEM_TRAVEL_Z = 1;
 const BACKGROUND_TRAVEL_Z = -SYSTEM_TRAVEL_Z;
 const START_DATE = new Date();
 const PHYSICAL_KM_PER_UNIT = 50_000_000;
+const PHYSICAL_ORBIT_CAMERA_BIAS = new THREE.Vector3(0, 135, 125);
+const assetUrl = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
 const simulationSpeeds = [
   { label: '1.00x', secondsPerSecond: 1 },
   { label: '60x', secondsPerSecond: 60 },
@@ -36,6 +39,49 @@ const viewModeDescriptions = {
   follow: '跟随选中天体，仅突出它的主轨迹与局部系统。',
 };
 
+const ui = {
+  en: {
+    celestialBodies: 'Celestial Bodies', search: 'Search bodies', star: 'Star', planets: 'Planets',
+    noMatches: 'No matching celestial bodies.', beijingTime: 'Beijing Time', lunar: 'Chinese Lunar',
+    simSpeed: 'Sim Speed', reset: 'Reset view', pause: 'Pause', play: 'Play', overview: 'Overview',
+    physical: 'Physical', composition: 'Composition', atmosphere: 'Atmosphere', radius: 'Radius',
+    distance: 'Distance to Parent', orbitPeriod: 'Orbit Period', rotationPeriod: 'Rotation Period',
+    velocity: 'Orbital Velocity', axialTilt: 'Axial Tilt', observation: 'Observation Mode',
+    center: 'System barycenter', days: 'days', hours: 'hours', additional: 'Additional Data',
+    gravity: 'Surface Gravity', escape: 'Escape Velocity', mass: 'Mass', moons: 'Moons',
+    magnitude: 'Visual Magnitude', reference: 'Reference Frame', positionModel: 'Position Model',
+    scaleModel: 'Scale Model', catalogue: 'Star Catalogue', lighting: 'Lighting', source: 'NASA source',
+    trueScale: 'True physical scale (1 unit = 50M km)', keepCentered: 'Keep selected body centered',
+    orbitView: 'Orbit View', spiralView: 'Artistic Spiral', followView: 'Follow View', elapsed: 'Elapsed',
+    drift: 'Forward drift', wheel: 'Wheel', zoom: 'Zoom', leftClick: 'Left drag', rotate: 'Rotate',
+    rightClick: 'Right drag', pan: 'Pan', select: 'Select', focusBody: 'Focus body',
+    inRange: 'EPHEMERIS IN RANGE', outRange: 'EPHEMERIS OUT OF RANGE',
+    physicalScale: 'Unified scale: 1 scene unit = 50 million km.', visualScale: 'Visual scale: sizes and distances are compressed separately.',
+    orbitDescription: 'Top-down system view for comparing positions and orbital scale.',
+    helicalDescription: 'Artistic galactic-frame view; trails express motion, not a precise galactic orbit.',
+    followDescription: 'Follow the selected body and emphasize its local system and trajectory.',
+  },
+  zh: {
+    celestialBodies: '天体列表', search: '搜索天体', star: '恒星', planets: '行星', noMatches: '没有匹配的天体。',
+    beijingTime: '北京时间', lunar: '中国农历', simSpeed: '模拟速度', reset: '重置视角', pause: '暂停', play: '播放',
+    overview: '概览', physical: '物理参数', composition: '组成', atmosphere: '大气', radius: '半径',
+    distance: '距母天体', orbitPeriod: '公转周期', rotationPeriod: '自转周期', velocity: '轨道速度',
+    axialTilt: '轴倾角', observation: '观察模式', center: '系统质心', days: '天', hours: '小时',
+    additional: '更多数据', gravity: '表面重力', escape: '逃逸速度', mass: '质量', moons: '卫星数',
+    magnitude: '视星等', reference: '参考系', positionModel: '位置模型', scaleModel: '比例模型',
+    catalogue: '恒星目录', lighting: '光照模型', source: 'NASA 资料来源',
+    trueScale: '真实物理比例（1 单位 = 5000 万 km）', keepCentered: '保持选中天体居中',
+    orbitView: '轨道视图', spiralView: '艺术螺旋', followView: '跟随视图', elapsed: '已运行',
+    drift: '前进距离', wheel: '滚轮', zoom: '缩放', leftClick: '左键拖动', rotate: '旋转',
+    rightClick: '右键拖动', pan: '平移', select: '选择', focusBody: '聚焦天体',
+    inRange: '星历有效范围内', outRange: '超出星历有效范围',
+    physicalScale: '统一比例：1 场景单位 = 5000 万 km。', visualScale: '视觉比例：尺寸与距离分别压缩。',
+    orbitDescription: '俯视完整轨道结构，适合比较行星位置与系统尺度。',
+    helicalDescription: '艺术化银河惯性视图；光迹用于表达运动，不代表精确银河轨道。',
+    followDescription: '跟随选中天体，仅突出它的主轨迹与局部系统。',
+  },
+};
+
 const trailBodyIds = ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune'];
 const trailColors = {
   mercury: '#d9d2c8',
@@ -48,8 +94,8 @@ const trailColors = {
   neptune: '#4f7cff',
 };
 
-function formatNumber(value, unit = '') {
-  return `${new Intl.NumberFormat('zh-CN').format(Math.round(value))}${unit}`;
+function formatNumber(value, unit = '', locale = 'zh-CN') {
+  return `${new Intl.NumberFormat(locale).format(Math.round(value))}${unit}`;
 }
 
 function formatFixed(value, digits = 2) {
@@ -273,6 +319,17 @@ function createStarTexture() {
   return texture;
 }
 
+function trailFade(distanceProgress, brightHold = 0.12) {
+  const normalized = THREE.MathUtils.clamp(
+    (distanceProgress - brightHold) / (1 - brightHold),
+    0,
+    1,
+  );
+  const smootherStep = normalized * normalized * normalized
+    * (normalized * (normalized * 6 - 15) + 10);
+  return 1 - smootherStep;
+}
+
 function createHelicalTrail(color, pointCount = 300, opacity = 0.74, glowTexture) {
   const positions = new Float32Array(pointCount * 3);
   const colors = new Float32Array(pointCount * 3);
@@ -283,7 +340,7 @@ function createHelicalTrail(color, pointCount = 300, opacity = 0.74, glowTexture
   const baseColor = new THREE.Color(color);
   for (let index = 0; index < pointCount; index += 1) {
     const progress = index / (pointCount - 1);
-    const intensity = 0.008 + Math.pow(progress, 2.7) * 1.06;
+    const intensity = trailFade(1 - progress);
     colors[index * 3] = baseColor.r * intensity;
     colors[index * 3 + 1] = baseColor.g * intensity;
     colors[index * 3 + 2] = baseColor.b * intensity;
@@ -305,10 +362,10 @@ function createHelicalTrail(color, pointCount = 300, opacity = 0.74, glowTexture
   const glowMaterial = new THREE.PointsMaterial({
     map: glowTexture,
     vertexColors: true,
-    size: 0.24,
+    size: 0.3,
     sizeAttenuation: true,
     transparent: true,
-    opacity: opacity * 0.46,
+    opacity: opacity * 0.58,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
@@ -322,10 +379,10 @@ function createHelicalTrail(color, pointCount = 300, opacity = 0.74, glowTexture
   const outerGlowMaterial = new THREE.PointsMaterial({
     map: glowTexture,
     vertexColors: true,
-    size: 0.66,
+    size: 0.86,
     sizeAttenuation: true,
     transparent: true,
-    opacity: opacity * 0.18,
+    opacity: opacity * 0.22,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
   });
@@ -361,7 +418,7 @@ function createSunMotionLine(glowTexture) {
   const baseColor = new THREE.Color('#ffbf47');
   for (let index = 0; index < pointCount; index += 1) {
     const progress = index / (pointCount - 1);
-    const intensity = Math.pow(1 - progress, 1.35);
+    const intensity = trailFade(progress, 0.1);
     colors[index * 3] = baseColor.r * intensity;
     colors[index * 3 + 1] = baseColor.g * intensity;
     colors[index * 3 + 2] = baseColor.b * intensity;
@@ -424,7 +481,7 @@ function getRushingTrailPoint(body, currentPosition, sunPosition, progress, mode
   const currentAngle = Math.atan2(currentPosition.y - sunPosition.y, currentPosition.x - sunPosition.x);
   const turns = THREE.MathUtils.clamp(2.7 - body.orbitRadius * 0.055, 1.2, 2.65);
   const angle = currentAngle - tail * turns * Math.PI * 2;
-  const depth = mode === 'follow' ? 32 : 52;
+  const depth = mode === 'follow' ? 58 : 96;
   const currentRadius = Math.hypot(currentPosition.x - sunPosition.x, currentPosition.y - sunPosition.y);
   const radius = Math.max(currentRadius, body.orbitRadius * 0.8);
   const pinch = Math.pow(tail, 0.82);
@@ -443,7 +500,9 @@ function createStarField(starTexture) {
   const geometry = new THREE.BufferGeometry();
   const positions = [];
   const colors = [];
-  for (let i = 0; i < 7000; i += 1) {
+  const brightPositions = [];
+  const brightColors = [];
+  for (let i = 0; i < 22_000; i += 1) {
     const radius = THREE.MathUtils.randFloat(36, 230);
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(THREE.MathUtils.randFloatSpread(2));
@@ -454,21 +513,47 @@ function createStarField(starTexture) {
     );
     const brightness = THREE.MathUtils.randFloat(0.7, 1);
     colors.push(brightness, brightness, THREE.MathUtils.randFloat(0.86, 1));
+    if (i % 23 === 0) {
+      brightPositions.push(
+        radius * Math.sin(phi) * Math.cos(theta),
+        radius * Math.cos(phi),
+        radius * Math.sin(phi) * Math.sin(theta),
+      );
+      const warm = Math.random() > 0.72;
+      brightColors.push(1, warm ? 0.88 : 0.96, warm ? 0.7 : 1);
+    }
   }
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  return new THREE.Points(
-    geometry,
-    new THREE.PointsMaterial({
+  const brightGeometry = new THREE.BufferGeometry();
+  brightGeometry.setAttribute('position', new THREE.Float32BufferAttribute(brightPositions, 3));
+  brightGeometry.setAttribute('color', new THREE.Float32BufferAttribute(brightColors, 3));
+  const field = new THREE.Group();
+  field.add(
+    new THREE.Points(geometry, new THREE.PointsMaterial({
       map: starTexture,
-      size: 0.17,
+      size: 0.23,
       vertexColors: true,
       transparent: true,
-      opacity: 0.96,
+      opacity: 1,
       depthWrite: false,
       alphaTest: 0.02,
-    }),
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    })),
+    new THREE.Points(brightGeometry, new THREE.PointsMaterial({
+      map: starTexture,
+      size: 0.72,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.94,
+      depthWrite: false,
+      alphaTest: 0.025,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    })),
   );
+  return field;
 }
 
 function starColorFromBv(bv) {
@@ -509,6 +594,7 @@ function createCatalogStarField(starTexture) {
     opacity: 1,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
+    toneMapped: false,
   }));
 }
 
@@ -540,19 +626,21 @@ function createMilkyWayBand(starTexture) {
     size: 0.3,
     vertexColors: true,
     transparent: true,
-    opacity: 0.88,
+    opacity: 0.48,
     depthWrite: false,
     alphaTest: 0.02,
     blending: THREE.AdditiveBlending,
+    toneMapped: false,
   });
   const glowMaterial = new THREE.PointsMaterial({
     map: starTexture,
     size: 1.35,
     vertexColors: true,
     transparent: true,
-    opacity: 0.22,
+    opacity: 0.1,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
+    toneMapped: false,
   });
   const band = new THREE.Group();
   band.add(new THREE.Points(geometry, glowMaterial), new THREE.Points(geometry, material));
@@ -562,7 +650,7 @@ function createMilkyWayBand(starTexture) {
 }
 
 function createSunMaterial() {
-  const surfaceTexture = loadBodyTexture('/textures/bodies/sun.jpg', { color: true });
+  const surfaceTexture = loadBodyTexture(assetUrl('/textures/bodies/sun.jpg'), { color: true });
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
@@ -621,19 +709,23 @@ function createSunMaterial() {
 
       void main() {
         vec3 observedSurface = texture2D(uSurfaceMap, vUv).rgb;
+        vec3 surfaceDetail = pow(max(observedSurface, vec3(0.015)), vec3(0.55));
         vec3 flow = vec3(uTime * 0.035, -uTime * 0.018, uTime * 0.024);
         float broad = fbm(vSurfacePosition * 3.8 + flow);
         float cells = fbm(vSurfacePosition * 12.0 - flow * 1.7);
         float filaments = 1.0 - smoothstep(0.035, 0.2, abs(fbm(vSurfacePosition * 7.0 + flow * 2.2) - 0.52));
         float heat = clamp(broad * 0.82 + cells * 0.42 + filaments * 0.3, 0.0, 1.35);
+        float granules = smoothstep(0.48, 0.78, cells + filaments * 0.28);
 
-        vec3 color = observedSurface * mix(0.68, 1.18, smoothstep(0.2, 1.05, heat));
-        color = mix(color, vec3(1.0, 0.7, 0.18), filaments * 0.18);
+        vec3 color = vec3(0.82, 0.075, 0.002) + surfaceDetail * vec3(0.92, 0.32, 0.055);
+        color *= mix(0.88, 1.28, smoothstep(0.24, 1.02, heat));
+        color += vec3(1.55, 0.72, 0.08) * granules * 0.82;
+        color = mix(color, vec3(1.72, 0.88, 0.2), filaments * 0.28);
 
         float facing = clamp(dot(normalize(vWorldNormal), normalize(vViewDirection)), 0.0, 1.0);
         float limb = pow(facing, 0.42);
-        color *= mix(0.55, 1.26, limb);
-        color += vec3(1.0, 0.24, 0.01) * filaments * 0.12;
+        color *= mix(0.88, 1.12, limb);
+        color += vec3(1.25, 0.42, 0.015) * filaments * 0.24;
         gl_FragColor = vec4(color, 1.0);
       }
     `,
@@ -680,7 +772,10 @@ function createRimGlowMaterial(color, opacity, power = 2.4) {
 }
 
 function loadBodyTexture(path, { color = false } = {}) {
-  const texture = new THREE.TextureLoader().load(path);
+  const assetPath = path.startsWith(import.meta.env.BASE_URL)
+    ? path
+    : assetUrl(path);
+  const texture = new THREE.TextureLoader().load(assetPath);
   if (color) texture.colorSpace = THREE.SRGBColorSpace;
   texture.anisotropy = 8;
   texture.wrapS = THREE.RepeatWrapping;
@@ -723,7 +818,7 @@ const atmosphereProfiles = {
 };
 
 function createEarthNightMaterial() {
-  const nightTexture = loadBodyTexture('/textures/earth/night.png', { color: true });
+  const nightTexture = loadBodyTexture(assetUrl('/textures/earth/night.png'), { color: true });
   return new THREE.ShaderMaterial({
     uniforms: {
       uNightMap: { value: nightTexture },
@@ -776,7 +871,7 @@ function addEarthSurfaceLayers(mesh, radius) {
   nightLights.renderOrder = 1;
   mesh.add(nightLights);
 
-  const cloudTexture = loadBodyTexture('/textures/earth/clouds.png', { color: true });
+  const cloudTexture = loadBodyTexture(assetUrl('/textures/earth/clouds.png'), { color: true });
   const clouds = new THREE.Mesh(
     detailGeometry.clone(),
     new THREE.MeshPhongMaterial({
@@ -991,7 +1086,7 @@ function createProceduralPlanetTexture(body) {
 
 function createPlanetRingMaterial(body) {
   if (body.id === 'saturn') {
-    const texture = loadBodyTexture('/textures/bodies/saturn-rings.png', { color: true });
+    const texture = loadBodyTexture(assetUrl('/textures/bodies/saturn-rings.png'), { color: true });
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.ClampToEdgeWrapping;
     texture.repeat.set(0.5, 1);
@@ -1072,10 +1167,10 @@ function createLabelSprite(body) {
 function createPlanetMaterial(body) {
   if (body.id === 'earth') {
     return new THREE.MeshPhongMaterial({
-      map: loadBodyTexture('/textures/earth/day.jpg', { color: true }),
-      normalMap: loadBodyTexture('/textures/earth/normal.jpg'),
+      map: loadBodyTexture(assetUrl('/textures/earth/day.jpg'), { color: true }),
+      normalMap: loadBodyTexture(assetUrl('/textures/earth/normal.jpg')),
       normalScale: new THREE.Vector2(0.62, 0.62),
-      specularMap: loadBodyTexture('/textures/earth/specular.jpg'),
+      specularMap: loadBodyTexture(assetUrl('/textures/earth/specular.jpg')),
       specular: new THREE.Color('#4d7189'),
       shininess: 14,
     });
@@ -1083,7 +1178,7 @@ function createPlanetMaterial(body) {
 
   const profile = bodyTextureProfiles[body.id];
   if (profile) {
-    const map = loadBodyTexture(`/textures/bodies/${profile.map}`, { color: true });
+    const map = loadBodyTexture(assetUrl(`/textures/bodies/${profile.map}`), { color: true });
     const materialOptions = {
       map,
       color: profile.tint ?? (profile.monochrome ? body.color : '#ffffff'),
@@ -1091,7 +1186,7 @@ function createPlanetMaterial(body) {
       metalness: 0,
     };
     if (profile.normal) {
-      materialOptions.normalMap = loadBodyTexture(`/textures/bodies/${profile.normal}`);
+      materialOptions.normalMap = loadBodyTexture(assetUrl(`/textures/bodies/${profile.normal}`));
       materialOptions.normalScale = new THREE.Vector2(0.52, 0.52);
     } else if (!profile.atmosphere) {
       materialOptions.bumpMap = map;
@@ -1139,19 +1234,27 @@ function buildSolarScene(mount, options) {
   controls.enableDamping = true;
   controls.dampingFactor = 0.06;
   controls.minDistance = 1.2;
-  controls.maxDistance = 130;
+  controls.maxDistance = 240;
   controls.panSpeed = 0.72;
   controls.rotateSpeed = 0.66;
   if (options.getState().viewMode === 'helical') controls.target.set(0, 0, -11);
 
-  const ambient = new THREE.AmbientLight('#7d8da6', 0.05);
+  // Keep a small cool floor so texture detail survives in space without
+  // flattening the day/night boundary created by the Sun.
+  const ambient = new THREE.AmbientLight('#71819a', 0.035);
   scene.add(ambient);
-  const sunLight = new THREE.PointLight('#fff4dc', 52, 0, 2);
-  sunLight.castShadow = true;
-  sunLight.shadow.mapSize.set(1024, 1024);
-  sunLight.shadow.bias = -0.00025;
+  // Orbit radii are compressed for navigation, so inverse-square falloff made
+  // the outer planets almost black. A gentler falloff preserves the radial Sun
+  // direction while keeping every planet's illuminated hemisphere readable.
+  const sunLight = new THREE.PointLight('#fff4dc', 160, 0, 1.2);
+  // Point-light shadow maps self-shadow the compressed, highly tessellated
+  // planet meshes and cover their textures with large faceted artifacts.
+  // The material normals still produce the correct Sun-facing terminator.
+  sunLight.castShadow = false;
   scene.add(sunLight);
-  const cameraLight = new THREE.PointLight('#dbeaff', 0.35, 0, 2);
+  // Only a trace of camera fill: enough for silhouettes, not enough to turn the
+  // hemisphere facing away from the Sun into another lit face.
+  const cameraLight = new THREE.PointLight('#b8c9e6', 0.12, 0, 2);
   scene.add(cameraLight);
 
   const starTexture = createStarTexture();
@@ -1240,14 +1343,25 @@ function buildSolarScene(mount, options) {
       : null;
 
     if (body.id === 'sun') {
+      const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: trailGlowTexture,
+        color: '#ff7a12',
+        transparent: true,
+        opacity: 0.68,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }));
+      halo.scale.setScalar(body.scaleRadius * 4.8);
+      halo.renderOrder = -1;
+      group.add(halo);
       const glow = new THREE.Mesh(
-        new THREE.SphereGeometry(body.scaleRadius * 1.24, 96, 48),
-        createRimGlowMaterial('#ff8a1d', 0.42, 1.8),
+        new THREE.SphereGeometry(body.scaleRadius * 1.2, 96, 48),
+        createRimGlowMaterial('#ffb52e', 0.76, 1.55),
       );
       group.add(glow);
       const corona = new THREE.Mesh(
-        new THREE.SphereGeometry(body.scaleRadius * 1.52, 96, 48),
-        createRimGlowMaterial('#ff4c0a', 0.07, 2.8),
+        new THREE.SphereGeometry(body.scaleRadius * 1.48, 96, 48),
+        createRimGlowMaterial('#ff6a0a', 0.16, 2.45),
       );
       group.add(corona);
     }
@@ -1311,11 +1425,37 @@ function buildSolarScene(mount, options) {
       group.add(marker);
     }
 
+    const physicalLocator = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: trailGlowTexture,
+      color: body.color,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: false,
+      blending: THREE.AdditiveBlending,
+    }));
+    const locatorSize = body.type === 'star'
+      ? 2.6
+      : body.type === 'moon'
+        ? 0.24
+        : 1.05;
+    physicalLocator.scale.setScalar(locatorSize);
+    physicalLocator.renderOrder = 20;
+    group.add(physicalLocator);
+
     const label = createLabelSprite(body);
     group.add(label);
 
-    const visuals = group.children.map((object) => ({ object, scale: object.scale.clone() }));
-    bodyNodes.set(body.id, { body, pivot, group, mesh, marker, label, earthLayers, visuals });
+    // Labels and locator overlays are navigational aids, not physical geometry.
+    // Keeping them out of this list prevents true scale from shrinking them away.
+    const helperVisuals = new Set([label, marker, physicalLocator].filter(Boolean));
+    const visuals = group.children
+      .filter((object) => !helperVisuals.has(object))
+      .map((object) => ({ object, scale: object.scale.clone() }));
+    const labelScale = label.scale.clone();
+    bodyNodes.set(body.id, {
+      body, pivot, group, mesh, marker, physicalLocator, label, labelScale, earthLayers, visuals,
+    });
     worldPositions.set(body.id, new THREE.Vector3());
   }
 
@@ -1352,9 +1492,9 @@ function buildSolarScene(mount, options) {
     const nearTail = sunBody.scaleRadius * 1.18;
     const farTail = mode === 'follow' ? 96 : 150;
     const highlighted = selectedId === 'sun';
-    sunMotionLine.material.opacity = highlighted ? 0.96 : 0.42;
-    sunMotionLine.glowMaterial.opacity = highlighted ? 0.7 : 0.16;
-    sunMotionLine.outerGlowMaterial.opacity = highlighted ? 0.24 : 0.04;
+    sunMotionLine.material.opacity = highlighted ? 0.82 : 0.34;
+    sunMotionLine.glowMaterial.opacity = highlighted ? 0.52 : 0.12;
+    sunMotionLine.outerGlowMaterial.opacity = highlighted ? 0.16 : 0.03;
     for (let index = 0; index < sunMotionLine.pointCount; index += 1) {
       const progress = index / (sunMotionLine.pointCount - 1);
       const distance = nearTail + progress * farTail;
@@ -1402,13 +1542,13 @@ function buildSolarScene(mount, options) {
         trail.group.visible = false;
         continue;
       }
-      const baseOpacity = selectedTrail ? 0.98 : mode === 'follow' ? 0.09 : selectedTrailId ? 0.36 : 0.42;
+      const baseOpacity = selectedTrail ? 0.9 : mode === 'follow' ? 0.12 : selectedTrailId ? 0.42 : 0.52;
       trail.group.visible = true;
       trail.material.opacity = baseOpacity;
-      trail.glowMaterial.opacity = baseOpacity * (selectedTrail ? 0.54 : 0.32);
-      trail.outerGlowMaterial.opacity = baseOpacity * (selectedTrail ? 0.2 : 0.1);
-      trail.glowMaterial.size = selectedTrail ? 0.32 : 0.2;
-      trail.outerGlowMaterial.size = selectedTrail ? 0.78 : 0.54;
+      trail.glowMaterial.opacity = baseOpacity * (selectedTrail ? 0.52 : 0.38);
+      trail.outerGlowMaterial.opacity = baseOpacity * (selectedTrail ? 0.2 : 0.11);
+      trail.glowMaterial.size = selectedTrail ? 0.4 : 0.31;
+      trail.outerGlowMaterial.size = selectedTrail ? 0.96 : 0.8;
 
       const currentPosition = worldPositions.get(id) ?? targetPosition;
       for (let index = 0; index < trail.pointCount; index += 1) {
@@ -1429,6 +1569,7 @@ function buildSolarScene(mount, options) {
     const delta = Math.min(clock.getDelta(), 0.05);
     visualTime += delta;
     const state = options.getState();
+    sunLight.intensity = state.scaleMode === 'physical' ? 5.2 : 52;
     if (state.playing) {
       const elapsedDelta = delta * state.secondsPerSecond;
       elapsedSeconds += elapsedDelta;
@@ -1469,6 +1610,19 @@ function buildSolarScene(mount, options) {
           ? 0.85 + Math.sin(performance.now() * 0.005) * 0.15
           : 0;
       }
+      if (node.physicalLocator) {
+        const selectedLocator = id === state.selectedId;
+        const hideLocatorForPhysicalCloseUp = physicalScale
+          && state.viewMode === 'follow'
+          && selectedLocator;
+        node.physicalLocator.material.opacity = physicalScale && !hideLocatorForPhysicalCloseUp
+          ? selectedLocator || node.body.type === 'star'
+            ? 1
+            : node.body.type === 'moon'
+              ? 0.38
+              : 0.82
+          : 0;
+      }
       const selectedBody = bodyMap[state.selectedId] ?? bodyMap.sun;
       const moonInSelectedSystem = node.body.type === 'moon' && node.body.parent === selectedBody.id;
       const selectedSystemCloseUp = state.viewMode === 'follow'
@@ -1481,11 +1635,17 @@ function buildSolarScene(mount, options) {
           ? 0.34
           : node.body.type === 'moon'
             ? 0.06
+            : physicalScale
+              ? 0.88
             : state.viewMode === 'follow'
               ? 0.18
               : state.viewMode === 'helical'
                 ? 0.5
                 : 0.72;
+      const physicalLabelScale = physicalScale
+        ? node.body.type === 'moon' ? 1.35 : 2.1
+        : 1;
+      node.label.scale.copy(node.labelScale).multiplyScalar(physicalLabelScale);
       node.group.getWorldPosition(worldPositions.get(id));
       if (node.body.type === 'moon') {
         const parentPosition = worldPositions.get(node.body.parent);
@@ -1511,6 +1671,9 @@ function buildSolarScene(mount, options) {
     cameraFocusPosition.copy(state.viewMode === 'orbit' ? worldPositions.get('sun') : targetPosition);
 
     const selectedBody = selected.body;
+    const selectedSceneRadius = state.scaleMode === 'physical'
+      ? physicalRadiusFor(selectedBody)
+      : selectedBody.scaleRadius;
     const distance = selectedBody.type === 'star'
       ? 40
       : selectedBody.type === 'planet'
@@ -1518,8 +1681,10 @@ function buildSolarScene(mount, options) {
         : 4.2;
     let cameraBias;
     if (state.viewMode === 'orbit') {
-      cameraBias = selectedBody.type === 'star'
-        ? new THREE.Vector3(0, 42, 38)
+      cameraBias = state.scaleMode === 'physical'
+        ? PHYSICAL_ORBIT_CAMERA_BIAS
+        : selectedBody.type === 'star'
+          ? new THREE.Vector3(0, 42, 38)
         : new THREE.Vector3(distance * 1.25, distance * 0.72, distance * 1.35);
     } else if (state.viewMode === 'helical') {
       cameraBias = selectedBody.type === 'star'
@@ -1528,22 +1693,22 @@ function buildSolarScene(mount, options) {
     } else {
       cameraBias = selectedBody.type === 'star'
         ? new THREE.Vector3(-8, 6.5, 15)
-        : new THREE.Vector3(selectedBody.scaleRadius * 7 + 7, selectedBody.scaleRadius * 2.2 + 2.4, selectedBody.scaleRadius * 4.4 + 7);
+        : new THREE.Vector3(selectedSceneRadius * 7 + 7, selectedSceneRadius * 2.2 + 2.4, selectedSceneRadius * 4.4 + 7);
     }
-    controls.minDistance = selectedBody.scaleRadius * (selectedBody.type === 'star' ? 1.68 : 1.18);
+    controls.minDistance = selectedSceneRadius * (selectedBody.type === 'star' ? 1.68 : 1.18);
     if (state.viewMode === 'follow' && selectedBody.type !== 'star') {
       const sunPosition = worldPositions.get('sun') ?? targetPosition;
       followSunVector.copy(sunPosition).sub(targetPosition).normalize();
       followSideVector.set(-followSunVector.z, 0, followSunVector.x).normalize();
       cameraGoal.copy(targetPosition)
-        .addScaledVector(followSunVector, selectedBody.scaleRadius * 3.8)
-        .addScaledVector(followSideVector, selectedBody.scaleRadius * 1.45);
-      cameraGoal.y += selectedBody.scaleRadius * 0.72;
+        .addScaledVector(followSunVector, selectedSceneRadius * 3.8)
+        .addScaledVector(followSideVector, selectedSceneRadius * 1.45);
+      cameraGoal.y += selectedSceneRadius * 0.72;
     } else if (state.viewMode === 'follow') {
       cameraGoal.copy(targetPosition).add(new THREE.Vector3(
-        -selectedBody.scaleRadius * 3.45,
-        selectedBody.scaleRadius * 1.25,
-        selectedBody.scaleRadius * 3.05,
+        -selectedSceneRadius * 3.45,
+        selectedSceneRadius * 1.25,
+        selectedSceneRadius * 3.05,
       ));
     } else {
       cameraGoal.copy(cameraFocusPosition).add(cameraBias);
@@ -1583,6 +1748,15 @@ function buildSolarScene(mount, options) {
     }
 
     controls.update();
+    const physicalCloseUp = state.scaleMode === 'physical' && state.viewMode === 'follow';
+    cameraLight.intensity = physicalCloseUp ? 0 : 0.35;
+    const nextNearPlane = physicalCloseUp
+      ? Math.max(selectedSceneRadius * 0.08, 0.0000001)
+      : 0.05;
+    if (camera.near !== nextNearPlane) {
+      camera.near = nextNearPlane;
+      camera.updateProjectionMatrix();
+    }
     camera.updateMatrixWorld();
     const exposureOrbitBody = selectedBody.type === 'planet'
       ? selectedBody
@@ -1590,7 +1764,11 @@ function buildSolarScene(mount, options) {
         ? bodyMap[selectedBody.parent]
         : bodyMap.earth;
     const observationExposure = state.viewMode === 'follow'
-      ? THREE.MathUtils.clamp(exposureOrbitBody.orbitRadius / bodyMap.earth.orbitRadius, 0.9, 3.4)
+      ? THREE.MathUtils.clamp(
+        Math.sqrt(exposureOrbitBody.orbitRadius / bodyMap.earth.orbitRadius),
+        0.95,
+        1.8,
+      )
       : 1;
     renderer.toneMappingExposure = THREE.MathUtils.lerp(
       renderer.toneMappingExposure,
@@ -1642,7 +1820,7 @@ function buildSolarScene(mount, options) {
   };
 }
 
-function BodyButton({ body, selectedId, onSelect, expanded = false, nested = false }) {
+function BodyButton({ body, selectedId, onSelect, locale, language, expanded = false, nested = false }) {
   const parent = body.parent ? bodyMap[body.parent] : null;
   return (
     <button
@@ -1650,13 +1828,13 @@ function BodyButton({ body, selectedId, onSelect, expanded = false, nested = fal
       className={`body-row ${nested ? 'nested' : ''} ${selectedId === body.id ? 'selected' : ''}`}
       onClick={() => onSelect(body.id)}
     >
-      <span className="body-dot" style={{ background: body.color }} />
+      <span className="body-dot body-texture" style={{ backgroundImage: `url(${textureForBody(body.id)})` }} />
       <span>
-        <strong>{body.name}</strong>
-        <small>{body.zh}</small>
+        <strong>{language === 'zh' ? body.zh : body.name}</strong>
+        <small>{language === 'zh' ? body.name : body.zh}</small>
       </span>
       <em>
-        {expanded ? '⌄' : body.type === 'moon' ? parent?.name : body.type === 'star' ? 'center' : formatDistance(body.distanceKm)}
+        {expanded ? '⌄' : body.type === 'moon' ? (language === 'zh' ? parent?.zh : parent?.name) : body.type === 'star' ? (language === 'zh' ? '中心' : 'center') : formatDistance(body.distanceKm)}
       </em>
     </button>
   );
@@ -1672,6 +1850,8 @@ function App() {
   const [autoFollow, setAutoFollow] = useState(true);
   const [viewMode, setViewMode] = useState(DEFAULT_VIEW_MODE);
   const [scaleMode, setScaleMode] = useState('visual');
+  const [language, setLanguage] = useState(() => localStorage.getItem('solar-rush-language') || 'zh');
+  const [detailTab, setDetailTab] = useState('overview');
   const [additionalDataOpen, setAdditionalDataOpen] = useState(false);
   const [cameraRevision, setCameraRevision] = useState(0);
   const [telemetry, setTelemetry] = useState({
@@ -1684,6 +1864,9 @@ function App() {
   });
 
   const selectedBody = bodyMap[selectedId] ?? bodyMap.sun;
+  const copy = ui[language];
+  const locale = language === 'zh' ? 'zh-CN' : 'en-US';
+  const bodyDetails = getBodyDetails(selectedBody);
   const ephemerisYear = telemetry.date.getUTCFullYear();
   const ephemerisInRange = ephemerisYear >= 1800 && ephemerisYear <= 2050;
   const referenceFrame = selectedBody.type === 'planet'
@@ -1718,6 +1901,10 @@ function App() {
     setViewMode(mode);
     setAutoFollow(true);
     setCameraRevision((value) => value + 1);
+  };
+  const changeLanguage = (nextLanguage) => {
+    setLanguage(nextLanguage);
+    localStorage.setItem('solar-rush-language', nextLanguage);
   };
   const timelineMarks = useMemo(() => {
     return Array.from({ length: 7 }, (_, index) => {
@@ -1754,7 +1941,7 @@ function App() {
     return () => scene.dispose();
   }, []);
 
-  const beijingFormatter = new Intl.DateTimeFormat('zh-CN', {
+  const beijingFormatter = new Intl.DateTimeFormat(locale, {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
     month: '2-digit',
@@ -1764,7 +1951,7 @@ function App() {
     second: '2-digit',
     hour12: false,
   });
-  const utcFormatter = new Intl.DateTimeFormat('zh-CN', {
+  const utcFormatter = new Intl.DateTimeFormat(locale, {
     timeZone: 'UTC',
     year: 'numeric',
     month: '2-digit',
@@ -1777,7 +1964,7 @@ function App() {
 
   return (
     <main className="app-shell">
-      <section ref={mountRef} className="space-stage" aria-label="3D 太阳系模拟器" />
+      <section ref={mountRef} className="space-stage" aria-label={language === 'zh' ? '3D 太阳系模拟器' : '3D Solar System Simulator'} />
 
       <header className="top-bar">
         <div className="brand-block">
@@ -1790,23 +1977,23 @@ function App() {
             <strong>{utcFormatter.format(telemetry.date)}</strong>
           </div>
           <div>
-            <span>Beijing Time</span>
+            <span>{copy.beijingTime}</span>
             <strong>{beijingFormatter.format(telemetry.date)}</strong>
           </div>
           <div>
-            <span>中国农历</span>
-            <strong>{formatLunarDate(telemetry.date)}</strong>
+            <span>{copy.lunar}</span>
+            <strong>{language === 'zh' ? formatLunarDate(telemetry.date) : new Intl.DateTimeFormat('en-US-u-ca-chinese', { month: 'long', day: 'numeric' }).format(telemetry.date)}</strong>
           </div>
         </div>
         <div className="controls">
           <div className="transport-controls" aria-label="time controls">
-            <button type="button" aria-label="Reset view" onClick={() => setCameraRevision((value) => value + 1)}>↺</button>
-            <button type="button" aria-label={playing ? 'Pause' : 'Play'} className={playing ? 'active' : ''} onClick={() => setPlaying((value) => !value)}>
+            <button type="button" aria-label={copy.reset} onClick={() => setCameraRevision((value) => value + 1)}>↺</button>
+            <button type="button" aria-label={playing ? copy.pause : copy.play} className={playing ? 'active' : ''} onClick={() => setPlaying((value) => !value)}>
               {playing ? 'Ⅱ' : '▶'}
             </button>
           </div>
           <label className="speed-control">
-            <span>Sim Speed</span>
+            <span>{copy.simSpeed}</span>
             <select value={speedIndex} onChange={(event) => setSpeedIndex(Number(event.target.value))}>
               {simulationSpeeds.map((item, index) => (
                 <option value={index} key={item.label}>
@@ -1815,25 +2002,29 @@ function App() {
               ))}
             </select>
           </label>
+          <div className="language-switcher" aria-label="Language">
+            <button type="button" className={language === 'zh' ? 'active' : ''} onClick={() => changeLanguage('zh')}>中</button>
+            <button type="button" className={language === 'en' ? 'active' : ''} onClick={() => changeLanguage('en')}>EN</button>
+          </div>
         </div>
       </header>
 
       <aside className="left-panel glass-panel">
         <div className="panel-title">
-          <span>Celestial Bodies</span>
+          <span>{copy.celestialBodies}</span>
           <strong>{bodies.length}</strong>
         </div>
         <label className="search-box">
           <input
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
-            placeholder="Search bodies"
+            placeholder={copy.search}
           />
         </label>
         {visibleIds.has('sun') && (
           <div className="body-group">
-            <h2>Star</h2>
-            <BodyButton body={bodyMap.sun} selectedId={selectedId} onSelect={(id) => {
+            <h2>{copy.star}</h2>
+            <BodyButton body={bodyMap.sun} selectedId={selectedId} language={language} locale={locale} onSelect={(id) => {
               setSelectedId(id);
               setAutoFollow(true);
               setCameraRevision((value) => value + 1);
@@ -1841,7 +2032,7 @@ function App() {
           </div>
         )}
         <div className="body-group">
-          <h2>Planets</h2>
+          <h2>{copy.planets}</h2>
           {planets.map((planet) => {
             const planetVisible = visibleIds.has(planet.id);
             const visibleMoons = planet.moons.map((moonId) => bodyMap[moonId]).filter((moon) => moon && visibleIds.has(moon.id));
@@ -1849,7 +2040,7 @@ function App() {
             return (
               <div className="tree-node" key={planet.id}>
                 {planetVisible && (
-                  <BodyButton body={planet} selectedId={selectedId} expanded={planet.moons.length > 0} onSelect={(id) => {
+                  <BodyButton body={planet} selectedId={selectedId} language={language} locale={locale} expanded={planet.moons.length > 0} onSelect={(id) => {
                     setSelectedId(id);
                     setAutoFollow(true);
                     setCameraRevision((value) => value + 1);
@@ -1858,7 +2049,7 @@ function App() {
                 {visibleMoons.length > 0 && (
                   <div className="moon-branch">
                     {visibleMoons.map((moon) => (
-                      <BodyButton key={moon.id} body={moon} selectedId={selectedId} nested onSelect={(id) => {
+                      <BodyButton key={moon.id} body={moon} selectedId={selectedId} language={language} locale={locale} nested onSelect={(id) => {
                         setSelectedId(id);
                         setAutoFollow(true);
                         setCameraRevision((value) => value + 1);
@@ -1871,67 +2062,83 @@ function App() {
           })}
         </div>
         {visibleBodies.length === 0 && (
-          <p className="empty-state">没有匹配的天体。</p>
+          <p className="empty-state">{copy.noMatches}</p>
         )}
       </aside>
 
       <aside className="right-panel glass-panel">
         <div className="body-hero">
-          <span className="body-preview" style={{ background: selectedBody.color }} />
+          <span className="body-preview body-texture" style={{ backgroundImage: `url(${textureForBody(selectedBody.id)})` }} />
           <div>
-            <strong>{selectedBody.name}</strong>
-            <small>{selectedBody.zh}</small>
+            <strong>{language === 'zh' ? selectedBody.zh : selectedBody.name}</strong>
+            <small>{language === 'zh' ? selectedBody.name : selectedBody.zh}</small>
           </div>
         </div>
         <div className="selected-heading">
           <span>{selectedBody.type.toUpperCase()}</span>
-          <h2>{selectedBody.name}</h2>
+          <h2>{language === 'zh' ? selectedBody.zh : selectedBody.name}</h2>
           <p>
-            {viewModeDescriptions[viewMode]}
+            {copy[`${viewMode}Description`]}
           </p>
           <div className={`science-status ${ephemerisInRange ? '' : 'warning'}`}>
-            <span>{ephemerisInRange ? 'EPHEMERIS IN RANGE' : 'EPHEMERIS OUT OF RANGE'}</span>
-            <small>{scaleMode === 'physical' ? '统一比例：1 场景单位 = 5000 万 km。' : '视觉比例：尺寸与距离分别压缩。'}</small>
+            <span>{ephemerisInRange ? copy.inRange : copy.outRange}</span>
+            <small>{scaleMode === 'physical' ? copy.physicalScale : copy.visualScale}</small>
           </div>
         </div>
 
         <div className="detail-tabs">
-          <button type="button" className="active">Overview</button>
-          <button type="button">Physical</button>
-          <button type="button">Composition</button>
-          <button type="button">Atmosphere</button>
+          {['overview', 'physical', 'composition', 'atmosphere'].map((tab) => (
+            <button key={tab} type="button" className={detailTab === tab ? 'active' : ''} onClick={() => setDetailTab(tab)}>
+              {copy[tab]}
+            </button>
+          ))}
         </div>
 
-        <div className="stat-list">
+        {detailTab === 'overview' && (
+          <div className="detail-copy">
+            <p>{bodyDetails.overview[language === 'zh' ? 1 : 0]}</p>
+            <a href={bodyDetails.source} target="_blank" rel="noreferrer">{copy.source} ↗</a>
+          </div>
+        )}
+        {detailTab === 'composition' && <div className="detail-copy"><p>{bodyDetails.composition[language === 'zh' ? 1 : 0]}</p><a href={bodyDetails.source} target="_blank" rel="noreferrer">{copy.source} ↗</a></div>}
+        {detailTab === 'atmosphere' && (
+          <div className="detail-copy atmosphere-detail">
+            <span className="detail-icon atmosphere-icon" aria-hidden="true">◌</span>
+            <p>{bodyDetails.atmosphere[language === 'zh' ? 1 : 0]}</p>
+            <a href={bodyDetails.source} target="_blank" rel="noreferrer">{copy.source} ↗</a>
+          </div>
+        )}
+
+        {(detailTab === 'overview' || detailTab === 'physical') && <div className="stat-list">
           <div>
-            <span>Radius</span>
-            <strong>{formatNumber(selectedBody.radiusKm, ' km')}</strong>
+            <span>{copy.radius}</span>
+            <strong>{formatNumber(selectedBody.radiusKm, ' km', locale)}</strong>
           </div>
           <div>
-            <span>Distance to Parent</span>
-            <strong>{selectedBody.parent ? formatDistance(selectedBody.distanceKm) : '系统质心'}</strong>
+            <span>{copy.distance}</span>
+            <strong>{selectedBody.parent ? formatDistance(selectedBody.distanceKm) : copy.center}</strong>
           </div>
           <div>
-            <span>Orbit Period</span>
-            <strong>{selectedBody.orbitDays ? `${formatFixed(Math.abs(selectedBody.orbitDays), 3)} 天` : 'N/A'}</strong>
+            <span>{copy.orbitPeriod}</span>
+            <strong>{selectedBody.orbitDays ? `${formatFixed(Math.abs(selectedBody.orbitDays), 3)} ${copy.days}` : 'N/A'}</strong>
           </div>
           <div>
-            <span>Rotation Period</span>
-            <strong>{formatFixed(Math.abs(selectedBody.rotationHours), 2)} 小时</strong>
+            <span>{copy.rotationPeriod}</span>
+            <strong>{formatFixed(Math.abs(selectedBody.rotationHours), 2)} {copy.hours}</strong>
           </div>
           <div>
-            <span>Orbital Velocity</span>
+            <span>{copy.velocity}</span>
             <strong>{formatFixed(selectedBody.speedKmS, 2)} km/s</strong>
           </div>
           <div>
-            <span>Axial Tilt</span>
+            <span>{copy.axialTilt}</span>
             <strong>{formatFixed(selectedBody.axialTilt, 2)}°</strong>
           </div>
           <div>
-            <span>Observation Mode</span>
-            <strong>{viewModeLabels[viewMode]}</strong>
+            <span>{copy.observation}</span>
+            <strong>{copy[viewMode === 'orbit' ? 'orbitView' : viewMode === 'helical' ? 'spiralView' : 'followView']}</strong>
           </div>
-        </div>
+        </div>}
 
         <button
           type="button"
@@ -1939,21 +2146,21 @@ function App() {
           aria-expanded={additionalDataOpen}
           onClick={() => setAdditionalDataOpen((value) => !value)}
         >
-          <span>Additional Data</span>
+          <span>{copy.additional}</span>
           <strong>{additionalDataOpen ? '⌃' : '⌄'}</strong>
         </button>
         {additionalDataOpen && (
           <div className="stat-list additional-stat-list">
-            <div><span>Surface Gravity</span><strong>{selectedBody.gravity}</strong></div>
-            <div><span>Escape Velocity</span><strong>{estimateEscapeVelocity(selectedBody)}</strong></div>
-            <div><span>Mass</span><strong>{selectedBody.mass}</strong></div>
-            <div><span>Moons</span><strong>{selectedBody.moons.length}</strong></div>
-            <div><span>Visual Magnitude</span><strong>{selectedBody.type === 'star' ? '-26.74' : '—'}</strong></div>
-            <div><span>Reference Frame</span><strong>{referenceFrame}</strong></div>
-            <div><span>Position Model</span><strong>{ephemerisModel}</strong></div>
-            <div><span>Scale Model</span><strong>{scaleMode === 'physical' ? 'Unified physical ratio' : 'Compressed visual scale'}</strong></div>
-            <div><span>Star Catalogue</span><strong>Hipparcos bright subset / ICRS</strong></div>
-            <div><span>Lighting</span><strong>Geometric eclipse + ring shadows</strong></div>
+            <div><span>{copy.gravity}</span><strong>{selectedBody.gravity}</strong></div>
+            <div><span>{copy.escape}</span><strong>{estimateEscapeVelocity(selectedBody)}</strong></div>
+            <div><span>{copy.mass}</span><strong>{selectedBody.mass}</strong></div>
+            <div><span>{copy.moons}</span><strong>{selectedBody.moons.length}</strong></div>
+            <div><span>{copy.magnitude}</span><strong>{selectedBody.type === 'star' ? '-26.74' : '—'}</strong></div>
+            <div><span>{copy.reference}</span><strong>{referenceFrame}</strong></div>
+            <div><span>{copy.positionModel}</span><strong>{ephemerisModel}</strong></div>
+            <div><span>{copy.scaleModel}</span><strong>{scaleMode === 'physical' ? 'Unified physical ratio' : 'Compressed visual scale'}</strong></div>
+            <div><span>{copy.catalogue}</span><strong>Hipparcos bright subset / ICRS</strong></div>
+            <div><span>{copy.lighting}</span><strong>Geometric eclipse + ring shadows</strong></div>
           </div>
         )}
 
@@ -1968,11 +2175,11 @@ function App() {
                 setCameraRevision((value) => value + 1);
               }}
             />
-            <span>True physical scale (1 unit = 50M km)</span>
+            <span>{copy.trueScale}</span>
           </label>
           <label className="toggle-row">
             <input type="checkbox" checked={autoFollow} onChange={(event) => setAutoFollow(event.target.checked)} />
-            <span>Keep selected body centered</span>
+            <span>{copy.keepCentered}</span>
           </label>
         </div>
       </aside>
@@ -1983,19 +2190,19 @@ function App() {
 
       <div className="view-switcher">
         <button type="button" className={viewMode === 'orbit' ? 'active' : ''} onClick={() => switchViewMode('orbit')}>
-          ◎ Orbit View
+          ◎ {copy.orbitView}
         </button>
         <button type="button" className={viewMode === 'helical' ? 'active' : ''} onClick={() => switchViewMode('helical')}>
-          ◈ Artistic Spiral
+          ◈ {copy.spiralView}
         </button>
         <button type="button" className={viewMode === 'follow' ? 'active' : ''} onClick={() => switchViewMode('follow')}>
-          △ Follow View
+          △ {copy.followView}
         </button>
       </div>
 
       <footer className="bottom-bar">
         <div className="timeline">
-          <span>Elapsed {formatElapsed(telemetry.elapsedSeconds)}</span>
+          <span>{copy.elapsed} {formatElapsed(telemetry.elapsedSeconds)}</span>
           <div className="track">
             <div className="tick-rail">
               {Array.from({ length: 73 }, (_, index) => (
@@ -2016,13 +2223,13 @@ function App() {
               ))}
             </div>
           </div>
-          <span>Forward drift {formatFixed(telemetry.forward, 4)} scene</span>
+          <span>{copy.drift} {formatFixed(telemetry.forward, 4)} scene</span>
         </div>
         <div className="hint-strip">
-          <kbd>滚轮</kbd> 缩放
-          <kbd>左键</kbd> 旋转
-          <kbd>右键</kbd> 平移
-          <kbd>Select</kbd> Focus body
+          <kbd>{copy.wheel}</kbd> {copy.zoom}
+          <kbd>{copy.leftClick}</kbd> {copy.rotate}
+          <kbd>{copy.rightClick}</kbd> {copy.pan}
+          <kbd>{copy.select}</kbd> {copy.focusBody}
         </div>
       </footer>
     </main>
