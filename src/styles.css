@@ -426,22 +426,6 @@ p {
   background-size: cover;
 }
 
-.body-texture.body-sun {
-  background-color: #2a1004;
-  background-blend-mode: normal;
-  filter: saturate(0.92) brightness(1.03) contrast(0.98);
-}
-
-.body-dot.body-sun {
-  box-shadow: 0 0 12px rgba(255, 139, 42, 0.62);
-}
-
-.body-preview.body-sun {
-  box-shadow:
-    inset -8px -7px 16px rgba(111, 53, 10, 0.15),
-    0 0 26px rgba(255, 139, 42, 0.3);
-}
-
 .body-row strong {
   display: block;
   color: #eef5ff;

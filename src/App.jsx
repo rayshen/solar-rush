@@ -760,22 +760,23 @@ function createSunMaterial() {
 
       void main() {
         vec3 observedSurface = texture2D(uSurfaceMap, vUv).rgb;
-        float observedLuma = dot(observedSurface, vec3(0.2126, 0.7152, 0.0722));
-        vec3 flow = vec3(uTime * 0.012, -uTime * 0.006, uTime * 0.009);
-        float broad = fbm(vSurfacePosition * 5.2 + flow);
-        float cells = fbm(vSurfacePosition * 28.0 - flow * 1.4);
-        float fineCells = fbm(vSurfacePosition * 58.0 + flow * 1.8);
-        float activity = smoothstep(0.3, 0.72, 1.0 - observedLuma);
-        float granulation = (cells - 0.5) * 0.13 + (fineCells - 0.5) * 0.07;
+        vec3 surfaceDetail = pow(max(observedSurface, vec3(0.015)), vec3(0.55));
+        vec3 flow = vec3(uTime * 0.035, -uTime * 0.018, uTime * 0.024);
+        float broad = fbm(vSurfacePosition * 3.8 + flow);
+        float cells = fbm(vSurfacePosition * 12.0 - flow * 1.7);
+        float filaments = 1.0 - smoothstep(0.035, 0.2, abs(fbm(vSurfacePosition * 7.0 + flow * 2.2) - 0.52));
+        float heat = clamp(broad * 0.82 + cells * 0.42 + filaments * 0.3, 0.0, 1.35);
+        float granules = smoothstep(0.48, 0.78, cells + filaments * 0.28);
 
-        vec3 solarOrange = vec3(1.26, 0.55, 0.09);
-        vec3 color = solarOrange * (0.94 + broad * 0.13 + granulation);
-        color *= 1.0 - activity * 0.24;
-        color = mix(color, vec3(0.72, 0.105, 0.012), activity * 0.22);
+        vec3 color = vec3(0.82, 0.075, 0.002) + surfaceDetail * vec3(0.92, 0.32, 0.055);
+        color *= mix(0.88, 1.28, smoothstep(0.24, 1.02, heat));
+        color += vec3(1.55, 0.72, 0.08) * granules * 0.82;
+        color = mix(color, vec3(1.72, 0.88, 0.2), filaments * 0.28);
 
         float facing = clamp(dot(normalize(vWorldNormal), normalize(vViewDirection)), 0.0, 1.0);
-        float limb = pow(facing, 0.32);
-        color *= mix(0.82, 1.06, limb);
+        float limb = pow(facing, 0.42);
+        color *= mix(0.88, 1.12, limb);
+        color += vec3(1.25, 0.42, 0.015) * filaments * 0.24;
         gl_FragColor = vec4(color, 1.0);
       }
     `,
@@ -1395,23 +1396,23 @@ function buildSolarScene(mount, options) {
     if (body.id === 'sun') {
       const halo = new THREE.Sprite(new THREE.SpriteMaterial({
         map: trailGlowTexture,
-        color: '#ff8a24',
+        color: '#ff7a12',
         transparent: true,
-        opacity: 0.3,
+        opacity: 0.68,
         depthWrite: false,
         blending: THREE.AdditiveBlending,
       }));
-      halo.scale.setScalar(body.scaleRadius * 4.2);
+      halo.scale.setScalar(body.scaleRadius * 4.8);
       halo.renderOrder = -1;
       group.add(halo);
       const glow = new THREE.Mesh(
         new THREE.SphereGeometry(body.scaleRadius * 1.2, 96, 48),
-        createRimGlowMaterial('#ffb23e', 0.4, 1.7),
+        createRimGlowMaterial('#ffb52e', 0.76, 1.55),
       );
       group.add(glow);
       const corona = new THREE.Mesh(
         new THREE.SphereGeometry(body.scaleRadius * 1.48, 96, 48),
-        createRimGlowMaterial('#ff6f16', 0.08, 2.7),
+        createRimGlowMaterial('#ff6a0a', 0.16, 2.45),
       );
       group.add(corona);
     }
