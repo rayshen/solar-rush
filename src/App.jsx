@@ -526,6 +526,27 @@ function getRushingTrailPoint(body, currentPosition, sunPosition, progress, mode
 }
 
 function createStarField(starTexture) {
+  const depthDrift = { value: 0 };
+  const createDriftingMaterial = (options) => {
+    const material = new THREE.PointsMaterial(options);
+    material.onBeforeCompile = (shader) => {
+      shader.uniforms.uDepthDrift = depthDrift;
+      shader.vertexShader = shader.vertexShader
+        .replace(
+          '#include <common>',
+          '#include <common>\nuniform float uDepthDrift;',
+        )
+        .replace(
+          '#include <begin_vertex>',
+          `#include <begin_vertex>
+          // Wrap stars independently instead of snapping the whole field back
+          // to its origin. The distributed wrap points keep the travel motion
+          // continuous without a synchronized background flash.
+          transformed.z = mod(transformed.z + uDepthDrift + 240.0, 480.0) - 240.0;`,
+        );
+    };
+    return material;
+  };
   const geometry = new THREE.BufferGeometry();
   const positions = [];
   const colors = [];
@@ -559,7 +580,7 @@ function createStarField(starTexture) {
   brightGeometry.setAttribute('color', new THREE.Float32BufferAttribute(brightColors, 3));
   const field = new THREE.Group();
   field.add(
-    new THREE.Points(geometry, new THREE.PointsMaterial({
+    new THREE.Points(geometry, createDriftingMaterial({
       map: starTexture,
       size: 0.23,
       vertexColors: true,
@@ -570,7 +591,7 @@ function createStarField(starTexture) {
       blending: THREE.AdditiveBlending,
       toneMapped: false,
     })),
-    new THREE.Points(brightGeometry, new THREE.PointsMaterial({
+    new THREE.Points(brightGeometry, createDriftingMaterial({
       map: starTexture,
       size: 0.72,
       vertexColors: true,
@@ -582,6 +603,7 @@ function createStarField(starTexture) {
       toneMapped: false,
     })),
   );
+  field.userData.depthDrift = depthDrift;
   return field;
 }
 
@@ -1520,7 +1542,6 @@ function buildSolarScene(mount, options) {
   const targetDelta = new THREE.Vector3();
   const followSunVector = new THREE.Vector3();
   const followSideVector = new THREE.Vector3();
-  const backgroundTravelDirection = new THREE.Vector3(0, 0, BACKGROUND_TRAVEL_Z);
   let simDays = 0;
   let elapsedSeconds = 0;
   let visualTime = 0;
@@ -1826,8 +1847,8 @@ function buildSolarScene(mount, options) {
       1.05 * observationExposure,
       1 - Math.pow(0.02, delta),
     );
-    const starDepthDrift = rushingMode ? THREE.MathUtils.euclideanModulo(forward * 2.4, 120) : 0;
-    galaxy.position.copy(camera.position).addScaledVector(backgroundTravelDirection, starDepthDrift);
+    galaxy.userData.depthDrift.value = rushingMode ? forward * BACKGROUND_TRAVEL_Z * 2.4 : 0;
+    galaxy.position.copy(camera.position);
     catalogStars.position.copy(camera.position);
     milkyWay.position.copy(camera.position);
     cameraLight.position.copy(camera.position);
