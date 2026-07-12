@@ -1943,8 +1943,8 @@ function App() {
   const selectedSpeed = simulationSpeeds[speedIndex];
   const selectedOrbitBody = selectedBody.orbitDays ? selectedBody : bodyMap.earth;
   const adaptiveOrbitDuration = THREE.MathUtils.clamp(
-    30 * Math.sqrt(Math.abs(selectedOrbitBody.orbitDays || 365.256) / 365.256),
-    30,
+    60 * Math.sqrt(Math.abs(selectedOrbitBody.orbitDays || 365.256) / 365.256),
+    60,
     180,
   );
   const secondsPerSecond = selectedSpeed.adaptiveOrbit
