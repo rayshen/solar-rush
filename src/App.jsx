@@ -1201,6 +1201,9 @@ function createMilkyWayBand(starTexture) {
     toneMapped: false,
   });
   const band = new THREE.Group();
+  band.userData.coreMaterial = material;
+  band.userData.glowMaterial = glowMaterial;
+  band.userData.visibilityScale = 1;
   band.add(new THREE.Points(glowGeometry, glowMaterial), new THREE.Points(geometry, material));
   return band;
 }
@@ -2522,6 +2525,20 @@ function buildSolarScene(mount, options) {
     galaxy.position.copy(camera.position);
     catalogStars.position.copy(camera.position);
     milkyWay.position.copy(camera.position);
+    // Moving through the Solar System produces no measurable Milky Way
+    // parallax, so keep its angular size fixed. A restrained contrast response
+    // still gives dolly motion some depth: close views are subdued by local
+    // light, while wide views reveal slightly more integrated Galactic light.
+    const viewDistance = camera.position.distanceTo(controls.target);
+    const distanceResponse = THREE.MathUtils.smoothstep(viewDistance, 6, 120);
+    const targetVisibilityScale = THREE.MathUtils.lerp(0.85, 1.15, distanceResponse);
+    milkyWay.userData.visibilityScale = THREE.MathUtils.lerp(
+      milkyWay.userData.visibilityScale,
+      targetVisibilityScale,
+      1 - Math.pow(0.015, delta),
+    );
+    milkyWay.userData.coreMaterial.opacity = 0.7 * milkyWay.userData.visibilityScale;
+    milkyWay.userData.glowMaterial.opacity = 0.18 * milkyWay.userData.visibilityScale;
     cameraLight.position.copy(camera.position);
     renderer.render(scene, camera);
 
