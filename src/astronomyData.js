@@ -24,6 +24,33 @@ export const brightStarCatalog = [
   { hip: 49669, name: 'Regulus', ra: 152.0936, dec: 11.9672, mag: 1.35, bv: -0.11 },
 ];
 
+// Observed radio position of Sagittarius A*, used as the physical dynamical
+// center anchor. This is intentionally distinct from the conventional
+// Galactic-coordinate origin (l=0°, b=0°).
+// Source: Reid & Brunthaler 2004, ApJ 616, 872.
+export const sagittariusAStar = {
+  icrsRightAscensionDeg: 266.4168371,
+  icrsDeclinationDeg: -29.0078106,
+  galacticLongitudeDeg: -0.0557489,
+  galacticLatitudeDeg: -0.0461649,
+  j2000EclipticLongitudeDeg: 266.8517,
+  j2000EclipticLatitudeDeg: -5.6077,
+};
+
+// Present-day Solar Galactocentric velocity expressed in the standard
+// Galactic (U, V, W) basis, then transformed to the J2000 ecliptic frame.
+// U points toward the Galactic center, V follows Galactic rotation, and W
+// points toward the north Galactic pole. The derived ecliptic direction is
+// used as an orientation anchor; Artistic Spiral still compresses distance
+// and trail pitch for legibility.
+// Velocity model: https://academic.oup.com/mnras/article/530/1/710/7630218
+// Coordinate transform: https://gea.esac.esa.int/archive/documentation/GDR3/Introduction/chap_cu0int/cu0int_sec_mission/cu0int_ssec_scanning_law_concepts.html
+export const solarGalactocentricMotion = {
+  velocityKmS: { u: 9.5, v: 250.7, w: 8.56 },
+  j2000EclipticLongitudeDeg: 342.18,
+  j2000EclipticLatitudeDeg: 60.98,
+};
+
 // JPL mean satellite elements. Epoch J2000.0 TDB. Angles are degrees.
 // These are mean-element propagations, not a substitute for Horizons/SPICE.
 export const satelliteMeanElements = {

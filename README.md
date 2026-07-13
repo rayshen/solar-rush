@@ -35,7 +35,7 @@ Centers the complete Solar System structure, emphasizing relative planetary posi
 
 ### Artistic Spiral
 
-Uses motion trails and depth to express the Solar System's forward movement while retaining celestial information and strengthening the sense of speed and immersion.
+Uses the present Solar Galactocentric velocity direction transformed into the J2000 ecliptic frame. Motion trails retain the measured orientation while compressing distance and pitch for legibility and immersion.
 
 ![Solar Rush Artistic Spiral concept](visuals/running.png)
 
@@ -69,12 +69,12 @@ The mobile layout keeps the 3D scene dominant and moves dense controls into an e
 
 ## Scientific Model and Scale
 
-- Planet positions use [Astronomy Engine](https://github.com/cosinekitty/astronomy) heliocentric vectors in the J2000 equatorial frame, transformed into the scene's J2000 ecliptic frame.
+- Planet positions use [Astronomy Engine](https://github.com/cosinekitty/astronomy) heliocentric state vectors in the J2000 equatorial frame, transformed into the scene's J2000 ecliptic frame. Each Artistic Spiral trail derives its instantaneous orbital plane from the planet's position and velocity angular-momentum vector, preserving its inclination and ascending-node orientation.
 - Major moon positions use compact J2000 mean-element propagation; they are visual approximations rather than Horizons/SPICE-grade satellite ephemerides.
-- The Milky Way is procedural rather than photographic, but its plane and Galactic center are transformed from Galactic coordinates into the J2000 catalogue sky. Density, bulge width, star clouds, and the central dust lane are visually modelled.
+- The Milky Way is procedural rather than photographic, but its conventional Galactic plane and Hipparcos stars are transformed from Galactic/ICRS coordinates through J2000 equatorial coordinates into the same J2000 ecliptic scene frame used by the planets. This preserves the approximately `60.19°` Galactic-plane/ecliptic-plane angle. The physical dynamical-center anchor uses the observed Sgr A* position (`λ 266.8517°`, `β −5.6077°`) rather than treating the historical Galactic-coordinate origin as identical to Sgr A*. Density, bulge width, star clouds, and the central dust lane remain visual models.
 - The face-on Galaxy subview uses ESA/Gaia's data-informed artist impression. Its Sun marker is calibrated to the annotated 8.2 kpc position; other structure labels are approximate anchors copied from the annotated model view, not measured boundaries. This is neither a photograph nor a full 3D stellar-density map.
 - Visual mode compresses body sizes and orbital distances independently for readability. Physical mode uses one unified scale: one scene unit equals 50 million kilometres.
-- `Artistic Spiral` motion trails express movement and depth; they are not a physical model of the Solar System's Galactic orbit.
+- `Artistic Spiral` uses a present-day Solar Galactocentric velocity model `(U, V, W) = (9.5, 250.7, 8.56) km/s`, transformed to J2000 ecliptic longitude `342.2°` and latitude `61.0°`. The orientation is data-based; trail distance and pitch remain visually compressed and are not a scale model of the full Galactic orbit.
 
 ## Tech Stack
 

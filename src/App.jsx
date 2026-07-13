@@ -4,20 +4,25 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
   Body as AstronomyBody,
+  HelioState,
   HelioVector,
+  RotateState,
   RotateVector,
   Rotation_EQJ_ECL,
 } from 'astronomy-engine';
 import { bodies, bodyMap, planetEphemerisElements } from './solarData.js';
-import { brightStarCatalog, satelliteMeanElements } from './astronomyData.js';
+import {
+  brightStarCatalog,
+  sagittariusAStar,
+  satelliteMeanElements,
+  solarGalactocentricMotion,
+} from './astronomyData.js';
 import { getBodyDetails, textureForBody } from './bodyDetails.js';
 
 const DAY_MS = 86_400_000;
 const MAX_UI_TIME_UPDATE_INTERVAL_MS = 1_000;
 const MIN_UI_TIME_UPDATE_INTERVAL_MS = 16;
 const J2000_MS = Date.UTC(2000, 0, 1, 12);
-const SYSTEM_TRAVEL_Z = 1;
-const BACKGROUND_TRAVEL_Z = -SYSTEM_TRAVEL_Z;
 const START_DATE = new Date();
 const PHYSICAL_KM_PER_UNIT = 50_000_000;
 const PHYSICAL_ORBIT_CAMERA_BIAS = new THREE.Vector3(0, 135, 125);
@@ -27,6 +32,40 @@ const GALAXY_MAP_SIZE = 250;
 const GALAXY_MOBILE_FILL = 1.8;
 const MOBILE_LAYOUT_MAX_WIDTH = 1240;
 const EQJ_TO_ECL = Rotation_EQJ_ECL();
+const ECLIPTIC_NORTH_SCENE = new THREE.Vector3(0, 1, 0);
+const galacticTravelLongitude = THREE.MathUtils.degToRad(
+  solarGalactocentricMotion.j2000EclipticLongitudeDeg,
+);
+const galacticTravelLatitude = THREE.MathUtils.degToRad(
+  solarGalactocentricMotion.j2000EclipticLatitudeDeg,
+);
+// J2000 ecliptic +X maps to scene +X, +Y to scene -Z, and +Z to scene +Y.
+const GALACTIC_TRAVEL_DIRECTION = new THREE.Vector3(
+  Math.cos(galacticTravelLatitude) * Math.cos(galacticTravelLongitude),
+  Math.sin(galacticTravelLatitude),
+  -Math.cos(galacticTravelLatitude) * Math.sin(galacticTravelLongitude),
+).normalize();
+const GALACTIC_TRAVEL_SIDE = new THREE.Vector3()
+  .crossVectors(ECLIPTIC_NORTH_SCENE, GALACTIC_TRAVEL_DIRECTION)
+  .normalize();
+const GALACTIC_TRAVEL_UP = new THREE.Vector3()
+  .crossVectors(GALACTIC_TRAVEL_DIRECTION, GALACTIC_TRAVEL_SIDE)
+  .normalize();
+const GALACTIC_BACKGROUND_ROTATION = new THREE.Quaternion().setFromUnitVectors(
+  new THREE.Vector3(0, 0, 1),
+  GALACTIC_TRAVEL_DIRECTION,
+);
+const rushingTrailRelative = new THREE.Vector3();
+const orbitNormalPosition = new THREE.Vector3();
+const orbitNormalVelocity = new THREE.Vector3();
+
+function galacticFrameVector(side, up, forward) {
+  return new THREE.Vector3()
+    .addScaledVector(GALACTIC_TRAVEL_SIDE, side)
+    .addScaledVector(GALACTIC_TRAVEL_UP, up)
+    .addScaledVector(GALACTIC_TRAVEL_DIRECTION, forward);
+}
+
 const assetUrl = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
 const simulationSpeeds = [
   { label: 'Adaptive orbit', adaptiveOrbit: true },
@@ -52,7 +91,7 @@ const viewModeLabels = {
 
 const viewModeDescriptions = {
   orbit: '俯视完整轨道结构，适合比较行星位置与系统尺度。',
-  helical: '艺术化银河惯性视图；光迹用于表达运动，不代表精确银河轨道。',
+  helical: '统一 J2000 黄道坐标；银道面—黄道面夹角 60.19°，各行星光迹遵循其瞬时 VSOP 轨道面。',
   follow: '跟随选中天体，仅突出它的主轨迹与局部系统。',
 };
 
@@ -64,6 +103,7 @@ const ui = {
     physical: 'Physical', composition: 'Composition', atmosphere: 'Atmosphere', radius: 'Radius',
     distance: 'Distance to Parent', orbitPeriod: 'Orbit Period', rotationPeriod: 'Rotation Period',
     velocity: 'Orbital Velocity', axialTilt: 'Axial Tilt', observation: 'Observation Mode',
+    orbitInclination: 'Orbital Inclination', ascendingNode: 'Ascending Node',
     center: 'System barycenter', days: 'days', hours: 'hours', additional: 'Additional Data',
     gravity: 'Surface Gravity', escape: 'Escape Velocity', mass: 'Mass', moons: 'Moons',
     magnitude: 'Visual Magnitude', reference: 'Reference Frame', positionModel: 'Position Model',
@@ -83,7 +123,7 @@ const ui = {
     physicalScale: 'Unified scale: 1 scene unit = 50 million km.', visualScale: 'Visual scale: sizes and distances are compressed separately.',
     orbitDescription: 'Top-down system view for comparing positions and orbital scale.',
     galaxyDescription: 'ESA/Gaia data-informed artist impression. The Solar System lies in the Orion Spur, about 26,600 light-years from the Galactic center.',
-    helicalDescription: 'Artistic galactic-frame view; trails express motion, not a precise galactic orbit.',
+    helicalDescription: 'Unified J2000 ecliptic frame: Galactic plane–ecliptic 60.19°; Sgr A* λ 266.8517°, β −5.6077°; present Galactocentric velocity λ 342.2°, β 61.0°. Trail scale is compressed.',
     followDescription: 'Follow the selected body and emphasize its local system and trajectory.',
   },
   zh: {
@@ -92,6 +132,7 @@ const ui = {
     overview: '概览', physical: '物理参数', composition: '组成', atmosphere: '大气', radius: '半径',
     distance: '距母天体', orbitPeriod: '公转周期', rotationPeriod: '自转周期', velocity: '轨道速度',
     axialTilt: '轴倾角', observation: '观察模式', center: '系统质心', days: '天', hours: '小时',
+    orbitInclination: '轨道倾角', ascendingNode: '升交点经度',
     additional: '更多数据', gravity: '表面重力', escape: '逃逸速度', mass: '质量', moons: '卫星数',
     magnitude: '视星等', reference: '参考系', positionModel: '位置模型', scaleModel: '比例模型',
     catalogue: '恒星目录', lighting: '光照模型', source: 'NASA 资料来源',
@@ -110,7 +151,7 @@ const ui = {
     physicalScale: '统一比例：1 场景单位 = 5000 万 km。', visualScale: '视觉比例：尺寸与距离分别压缩。',
     orbitDescription: '俯视完整轨道结构，适合比较行星位置与系统尺度。',
     galaxyDescription: '基于 ESA/Gaia 数据制作的艺术重建俯视图：太阳系位于猎户支臂，距银心约 2.66 万光年。',
-    helicalDescription: '艺术化银河惯性视图；光迹用于表达运动，不代表精确银河轨道。',
+    helicalDescription: '统一 J2000 黄道坐标：银道面—黄道面 60.19°；Sgr A* 黄经 266.8517°、黄纬 −5.6077°；当前银心速度方向为黄经 342.2°、黄纬 61.0°。光迹尺度经过压缩。',
     followDescription: '跟随选中天体，仅突出它的主轨迹与局部系统。',
   },
 };
@@ -167,14 +208,14 @@ const galaxyFeatureImages = {
 const galaxyFeatureDetails = {
   'galactic-center': {
     summary: ['The central region of the Milky Way, whose dynamical center is associated with Sagittarius A* and which contains nested structures at radically different scales.', '银河系中央区域；其动力学中心与人马座 A* 对应，并包含尺度差异巨大的嵌套结构。'],
-    facts: [['动力学中心', '与人马座 A* 对应'], ['内部结构', '人马座 A*、核星团、核球'], ['地图尺度', '在全银河视图中无法按比例分辨']],
-    factsEn: [['Dynamical center', 'Associated with Sagittarius A*'], ['Nested structures', 'Sgr A*, nuclear cluster, bulge'], ['Map scale', 'Not resolvable to scale in a Galaxy-wide view']],
+    facts: [['动力学中心', '由 Sgr A* 观测位置锚定'], ['坐标约定', '银河坐标原点 l=0°、b=0°，与 Sgr A* 相差约 0.07°'], ['内部结构', 'Sgr A*、核星团、核球'], ['地图尺度', '在全银河视图中无法按比例分辨']],
+    factsEn: [['Dynamical center', 'Anchored to the observed Sgr A* position'], ['Coordinate convention', 'Galactic origin l=0°, b=0° differs from Sgr A* by ~0.07°'], ['Nested structures', 'Sgr A*, nuclear cluster, bulge'], ['Map scale', 'Not resolvable to scale in a Galaxy-wide view']],
     source: 'https://science.nasa.gov/mission/webb/science-overview/science-explainers/what-is-the-center-of-our-galaxy-like/',
   },
   'sgr-a': {
     summary: ['The compact radio source associated with the Milky Way’s central supermassive black hole.', '银河系中心超大质量黑洞对应的致密射电源。'],
-    facts: [['估算质量', '约 400 万个太阳质量'], ['物理角色', '银河系动力学中心'], ['地图表达', '定位符号，非比例实体']],
-    factsEn: [['Estimated mass', '~4 million solar masses'], ['Physical role', 'Galactic dynamical center'], ['Map representation', 'Locator symbol; not to scale']],
+    facts: [['估算质量', '约 400 万个太阳质量'], ['物理角色', '银河系动力学中心'], ['ICRS J2000', '赤经 266.4168° · 赤纬 −29.0078°'], ['J2000 黄道坐标', '黄经 266.8517° · 黄纬 −5.6077°'], ['地图表达', '定位符号，非比例实体']],
+    factsEn: [['Estimated mass', '~4 million solar masses'], ['Physical role', 'Galactic dynamical center'], ['ICRS J2000', 'RA 266.4168° · Dec −29.0078°'], ['J2000 ecliptic', 'λ 266.8517° · β −5.6077°'], ['Map representation', 'Locator symbol; not to scale']],
     source: 'https://science.nasa.gov/mission/webb/science-overview/science-explainers/what-is-the-center-of-our-galaxy-like/',
   },
   'nuclear-cluster': {
@@ -410,6 +451,34 @@ function setPlanetScenePosition(id, date, sceneSemiMajorAxis, out, orbitEccentri
   // Map the JPL ecliptic frame into Three.js without mirroring its handedness:
   // ecliptic +X -> scene +X, +Y -> scene -Z, +Z -> scene +Y.
   return out.set(eclipticX * sceneScale, eclipticZ * sceneScale, -eclipticY * sceneScale);
+}
+
+function setPlanetOrbitNormal(id, date, out) {
+  const astronomyBody = astronomyPlanetBodies[id];
+  if (astronomyBody) {
+    const eclipticState = RotateState(EQJ_TO_ECL, HelioState(astronomyBody, date));
+    orbitNormalPosition.set(eclipticState.x, eclipticState.z, -eclipticState.y);
+    orbitNormalVelocity.set(eclipticState.vx, eclipticState.vz, -eclipticState.vy);
+    return out.crossVectors(orbitNormalPosition, orbitNormalVelocity).normalize();
+  }
+
+  const elements = getPlanetElementsAtDate(id, date);
+  if (!elements) return out.copy(ECLIPTIC_NORTH_SCENE);
+  const sinInclination = Math.sin(elements.inclination);
+  return out.set(
+    sinInclination * Math.sin(elements.longitudeNode),
+    Math.cos(elements.inclination),
+    sinInclination * Math.cos(elements.longitudeNode),
+  ).normalize();
+}
+
+function getPlanetOrbitOrientation(id, date) {
+  const normal = setPlanetOrbitNormal(id, date, new THREE.Vector3());
+  const inclination = Math.acos(THREE.MathUtils.clamp(normal.y, -1, 1));
+  const ascendingNode = inclination > 1e-10
+    ? THREE.MathUtils.euclideanModulo(Math.atan2(normal.x, normal.z), Math.PI * 2)
+    : 0;
+  return { inclination, ascendingNode };
 }
 
 function setSatelliteScenePosition(body, date, sceneSemiMajorAxis, out) {
@@ -661,23 +730,22 @@ function createSunMotionLine(glowTexture) {
   };
 }
 
-function getRushingTrailPoint(body, currentPosition, sunPosition, progress, mode, out) {
+function getRushingTrailPoint(body, currentPosition, sunPosition, orbitNormal, progress, mode, out) {
   const tail = 1 - progress;
-  const currentAngle = Math.atan2(currentPosition.y - sunPosition.y, currentPosition.x - sunPosition.x);
   const turns = THREE.MathUtils.clamp(2.7 - body.orbitRadius * 0.055, 1.2, 2.65);
-  const angle = currentAngle - tail * turns * Math.PI * 2;
   const depth = mode === 'follow' ? 58 : 96;
-  const currentRadius = Math.hypot(currentPosition.x - sunPosition.x, currentPosition.y - sunPosition.y);
+  rushingTrailRelative.copy(currentPosition).sub(sunPosition);
+  const currentRadius = rushingTrailRelative.length();
   const radius = Math.max(currentRadius, body.orbitRadius * 0.8);
   const pinch = Math.pow(tail, 0.82);
   const curl = Math.sin(tail * Math.PI) * 0.52 + 0.48;
   const coilRadius = currentRadius + radius * pinch * curl * 0.18;
-
-  out.set(
-    sunPosition.x + Math.cos(angle) * coilRadius,
-    sunPosition.y + Math.sin(angle) * coilRadius,
-    currentPosition.z - SYSTEM_TRAVEL_Z * tail * depth + Math.sin(angle) * radius * pinch,
-  );
+  rushingTrailRelative
+    .applyAxisAngle(orbitNormal, -tail * turns * Math.PI * 2)
+    .multiplyScalar(currentRadius > 0 ? coilRadius / currentRadius : 1);
+  out.copy(sunPosition)
+    .add(rushingTrailRelative)
+    .addScaledVector(GALACTIC_TRAVEL_DIRECTION, -tail * depth);
   return out;
 }
 
@@ -951,6 +1019,14 @@ function starColorFromBv(bv) {
   return new THREE.Color('#ff9d72');
 }
 
+function pushEquatorialToEclipticScene(x, y, z, target) {
+  const rotation = EQJ_TO_ECL.rot;
+  const eclipticX = rotation[0][0] * x + rotation[1][0] * y + rotation[2][0] * z;
+  const eclipticY = rotation[0][1] * x + rotation[1][1] * y + rotation[2][1] * z;
+  const eclipticZ = rotation[0][2] * x + rotation[1][2] * y + rotation[2][2] * z;
+  target.push(eclipticX, eclipticZ, -eclipticY);
+}
+
 function createCatalogStarField(starTexture) {
   const positions = [];
   const colors = [];
@@ -959,10 +1035,11 @@ function createCatalogStarField(starTexture) {
     const ra = THREE.MathUtils.degToRad(star.ra);
     const dec = THREE.MathUtils.degToRad(star.dec);
     const radius = 205;
-    positions.push(
+    pushEquatorialToEclipticScene(
       radius * Math.cos(dec) * Math.cos(ra),
+      radius * Math.cos(dec) * Math.sin(ra),
       radius * Math.sin(dec),
-      -radius * Math.cos(dec) * Math.sin(ra),
+      positions,
     );
     const color = starColorFromBv(star.bv);
     colors.push(color.r, color.g, color.b);
@@ -986,8 +1063,8 @@ function createCatalogStarField(starTexture) {
 }
 
 function createMilkyWayBand(starTexture) {
-  // Galactic coordinates transformed into the J2000 equatorial frame. This
-  // keeps the bright Galactic center and plane aligned with the catalogue sky.
+  // Galactic coordinates pass through the J2000 equatorial frame into the
+  // same J2000 ecliptic scene frame used by the planetary ephemerides.
   const galacticToScene = (longitude, latitude, radius, target) => {
     const cosLatitude = Math.cos(latitude);
     const gx = radius * cosLatitude * Math.cos(longitude);
@@ -996,9 +1073,11 @@ function createMilkyWayBand(starTexture) {
     const eqX = -0.0548755604 * gx + 0.4941094279 * gy - 0.8676661490 * gz;
     const eqY = -0.8734370902 * gx - 0.4448296300 * gy - 0.1980763734 * gz;
     const eqZ = -0.4838350155 * gx + 0.7469822445 * gy + 0.4559837762 * gz;
-    target.push(eqX, eqZ, -eqY);
+    pushEquatorialToEclipticScene(eqX, eqY, eqZ, target);
   };
   let seed = 0x7f4a7c15;
+  const physicalCenterLongitude = THREE.MathUtils.degToRad(sagittariusAStar.galacticLongitudeDeg);
+  const physicalCenterLatitude = THREE.MathUtils.degToRad(sagittariusAStar.galacticLatitudeDeg);
   const random = () => {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     return seed / 4294967296;
@@ -1008,22 +1087,27 @@ function createMilkyWayBand(starTexture) {
   for (let i = 0; i < 42_000; i += 1) {
     // Concentrate stars toward the Galactic center while retaining the full band.
     const centerBiased = random() < 0.34;
-    const longitude = centerBiased
+    const longitudeOffset = centerBiased
       ? (random() - random()) * 0.72
       : random() * Math.PI * 2 - Math.PI;
-    const centerStrength = Math.exp(-Math.pow(longitude / 0.62, 2));
+    const longitude = physicalCenterLongitude + longitudeOffset;
+    const centerStrength = Math.exp(-Math.pow(longitudeOffset / 0.62, 2));
     const bandWidth = 0.035 + centerStrength * 0.115;
-    const latitude = (random() - random()) * bandWidth
-      + Math.sin(longitude * 2.0 + 0.5) * 0.012;
+    // The conventional Galactic plane remains b=0°. Only the central density
+    // peak approaches the observed Sgr A* latitude; this keeps the coordinate
+    // plane distinct from the physical dynamical-center anchor.
+    const latitudeCenter = centerStrength * physicalCenterLatitude;
+    const latitude = latitudeCenter + (random() - random()) * bandWidth;
     const radius = 182 + random() * 34;
     galacticToScene(longitude, latitude, radius, positions);
 
     // A dim mid-plane creates the split dust lane; longitudinal modulation
     // breaks the synthetic uniform stripe into recognizable star-cloud patches.
-    const dustLane = 0.34 + 0.66 * (1 - Math.exp(-Math.pow(latitude / 0.018, 2)));
+    const dustLaneLatitude = latitude - latitudeCenter;
+    const dustLane = 0.34 + 0.66 * (1 - Math.exp(-Math.pow(dustLaneLatitude / 0.018, 2)));
     const cloud = 0.68
-      + 0.18 * Math.sin(longitude * 5.0 + 0.7)
-      + 0.12 * Math.sin(longitude * 17.0 - latitude * 90.0);
+      + 0.18 * Math.sin(longitudeOffset * 5.0 + 0.7)
+      + 0.12 * Math.sin(longitudeOffset * 17.0 - dustLaneLatitude * 90.0);
     const brightness = Math.max(0.12, (0.52 + centerStrength * 0.68) * dustLane * cloud)
       * (0.72 + random() * 0.34);
     const warmCenter = centerStrength * 0.2;
@@ -1636,7 +1720,9 @@ function buildSolarScene(mount, options) {
 
   const camera = new THREE.PerspectiveCamera(54, mount.clientWidth / mount.clientHeight, 0.05, 2400);
   if (options.getState().viewMode === 'helical') {
-    camera.position.set(...(options.getState().helicalView === 'rear' ? [32, 22, -70] : [-20, 14, 43]));
+    camera.position.copy(options.getState().helicalView === 'rear'
+      ? galacticFrameVector(32, 22, -70)
+      : galacticFrameVector(-20, 14, 43));
   }
   else camera.position.set(0, 42, 38);
 
@@ -1662,7 +1748,9 @@ function buildSolarScene(mount, options) {
   controls.panSpeed = 0.72;
   controls.rotateSpeed = 0.66;
   if (options.getState().viewMode === 'helical') {
-    controls.target.set(0, 0, options.getState().helicalView === 'rear' ? 11 : -11);
+    controls.target.copy(GALACTIC_TRAVEL_DIRECTION).multiplyScalar(
+      options.getState().helicalView === 'rear' ? 11 : -11,
+    );
   }
   const initialCameraPose = options.getState().cameraPose;
   if (initialCameraPose) {
@@ -1692,6 +1780,7 @@ function buildSolarScene(mount, options) {
 
   const starTexture = createStarTexture();
   const galaxy = createStarField(starTexture);
+  galaxy.quaternion.copy(GALACTIC_BACKGROUND_ROTATION);
   scene.add(galaxy);
   const catalogStars = createCatalogStarField(starTexture);
   scene.add(catalogStars);
@@ -1923,6 +2012,7 @@ function buildSolarScene(mount, options) {
   const pointer = new THREE.Vector2();
   const pointerStart = new THREE.Vector2();
   const trailPoint = new THREE.Vector3();
+  const trailOrbitNormal = new THREE.Vector3();
   const physicalRadiusFor = (body) => body.radiusKm / PHYSICAL_KM_PER_UNIT;
   const physicalOrbitFor = (body) => body.distanceKm / PHYSICAL_KM_PER_UNIT;
 
@@ -1973,14 +2063,14 @@ function buildSolarScene(mount, options) {
       const progress = index / (sunMotionLine.pointCount - 1);
       const distance = nearTail + progress * farTail;
       const pointIndex = index * 3;
-      sunMotionLine.positions[pointIndex] = sunPosition.x;
-      sunMotionLine.positions[pointIndex + 1] = sunPosition.y;
-      sunMotionLine.positions[pointIndex + 2] = sunPosition.z - SYSTEM_TRAVEL_Z * distance;
+      sunMotionLine.positions[pointIndex] = sunPosition.x - GALACTIC_TRAVEL_DIRECTION.x * distance;
+      sunMotionLine.positions[pointIndex + 1] = sunPosition.y - GALACTIC_TRAVEL_DIRECTION.y * distance;
+      sunMotionLine.positions[pointIndex + 2] = sunPosition.z - GALACTIC_TRAVEL_DIRECTION.z * distance;
     }
     sunMotionLine.geometry.attributes.position.needsUpdate = true;
   };
 
-  const updateHelicalTrails = (mode, selectedId) => {
+  const updateHelicalTrails = (mode, selectedId, simulationDate) => {
     const trailsVisible = mode === 'helical' || mode === 'follow';
     helicalTrailGroup.visible = trailsVisible;
     const selectedBody = bodyMap[selectedId] ?? bodyMap.sun;
@@ -2025,9 +2115,18 @@ function buildSolarScene(mount, options) {
       trail.outerGlowMaterial.size = selectedTrail ? 0.96 : 0.8;
 
       const currentPosition = worldPositions.get(id) ?? targetPosition;
+      setPlanetOrbitNormal(id, simulationDate, trailOrbitNormal);
       for (let index = 0; index < trail.pointCount; index += 1) {
         const progress = index / (trail.pointCount - 1);
-        getRushingTrailPoint(body, currentPosition, sunPosition, progress, mode, trailPoint);
+        getRushingTrailPoint(
+          body,
+          currentPosition,
+          sunPosition,
+          trailOrbitNormal,
+          progress,
+          mode,
+          trailPoint,
+        );
         const pointIndex = index * 3;
         trail.positions[pointIndex] = trailPoint.x;
         trail.positions[pointIndex + 1] = trailPoint.y;
@@ -2053,9 +2152,9 @@ function buildSolarScene(mount, options) {
     const forward = simDays * 0.18;
     const simulationDate = new Date(START_DATE.getTime() + simDays * DAY_MS);
     const rushingMode = state.viewMode === 'helical' || state.viewMode === 'follow';
-    const targetRootTilt = rushingMode ? Math.PI / 2 : 0;
-    systemRoot.rotation.x = THREE.MathUtils.lerp(systemRoot.rotation.x, targetRootTilt, 1 - Math.pow(0.001, delta));
-    systemRoot.position.set(0, rushingMode ? 0 : Math.sin(simDays * 0.25) * 0.08, forward * SYSTEM_TRAVEL_Z);
+    systemRoot.rotation.x = THREE.MathUtils.lerp(systemRoot.rotation.x, 0, 1 - Math.pow(0.001, delta));
+    systemRoot.position.copy(GALACTIC_TRAVEL_DIRECTION).multiplyScalar(forward);
+    if (!rushingMode) systemRoot.position.y += Math.sin(simDays * 0.25) * 0.08;
     for (const [id, node] of bodyNodes) {
       const orbitDays = node.body.orbitDays || 1;
       const physicalScale = state.scaleMode === 'physical';
@@ -2182,7 +2281,7 @@ function buildSolarScene(mount, options) {
     milkyWay.visible = !galaxyView;
     catalogStars.visible = !galaxyView;
     updateSunMotionLine(state.viewMode, state.selectedId);
-    updateHelicalTrails(state.viewMode, state.selectedId);
+    updateHelicalTrails(state.viewMode, state.selectedId, simulationDate);
     if (galaxyView) {
       sunMotionLine.group.visible = false;
       helicalTrailGroup.visible = false;
@@ -2218,9 +2317,9 @@ function buildSolarScene(mount, options) {
       const viewDirection = state.helicalView === 'rear' ? -1 : 1;
       cameraBias = selectedBody.type === 'star'
         ? state.helicalView === 'rear'
-          ? new THREE.Vector3(32, 22, -70)
-          : new THREE.Vector3(-20, 14, 43)
-        : new THREE.Vector3(
+          ? galacticFrameVector(32, 22, -70)
+          : galacticFrameVector(-20, 14, 43)
+        : galacticFrameVector(
           -distance * (state.helicalView === 'rear' ? 1.55 : 0.96) * viewDirection,
           distance * (state.helicalView === 'rear' ? 0.7 : 0.44),
           distance * (state.helicalView === 'rear' ? 1.5 : 0.92) * viewDirection,
@@ -2254,7 +2353,10 @@ function buildSolarScene(mount, options) {
     lookAtGoal.copy(cameraFocusPosition);
     if (state.viewMode === 'helical') {
       const lookDistance = selectedBody.type === 'star' ? 11 : 6.5;
-      lookAtGoal.z += state.helicalView === 'rear' ? lookDistance : -lookDistance;
+      lookAtGoal.addScaledVector(
+        GALACTIC_TRAVEL_DIRECTION,
+        state.helicalView === 'rear' ? lookDistance : -lookDistance,
+      );
     }
 
     const cameraTargetChanged = state.selectedId !== lastSelectedId
@@ -2331,7 +2433,7 @@ function buildSolarScene(mount, options) {
       1.05 * observationExposure,
       1 - Math.pow(0.02, delta),
     );
-    galaxy.userData.depthDrift.value = rushingMode ? forward * BACKGROUND_TRAVEL_Z * 2.4 : 0;
+    galaxy.userData.depthDrift.value = rushingMode ? -forward * 2.4 : 0;
     galaxy.position.copy(camera.position);
     catalogStars.position.copy(camera.position);
     milkyWay.position.copy(camera.position);
@@ -2644,6 +2746,9 @@ function App() {
     : selectedBody.type === 'moon'
       ? 'JPL J2000 mean elements'
       : 'Scene origin';
+  const selectedOrbitOrientation = selectedBody.type === 'planet'
+    ? getPlanetOrbitOrientation(selectedBody.id, telemetry.date)
+    : null;
   const selectedSpeed = simulationSpeeds[speedIndex];
   const selectedOrbitBody = selectedBody.orbitDays ? selectedBody : bodyMap.earth;
   const adaptiveOrbitDuration = THREE.MathUtils.clamp(
@@ -3252,6 +3357,18 @@ function App() {
             <div><span>{copy.magnitude}</span><strong>{selectedBody.type === 'star' ? '-26.74' : '—'}</strong></div>
             <div><span>{copy.reference}</span><strong>{referenceFrame}</strong></div>
             <div><span>{copy.positionModel}</span><strong>{ephemerisModel}</strong></div>
+            {selectedOrbitOrientation && (
+              <>
+                <div>
+                  <span>{copy.orbitInclination}</span>
+                  <strong>{formatFixed(THREE.MathUtils.radToDeg(selectedOrbitOrientation.inclination), 4)}°</strong>
+                </div>
+                <div>
+                  <span>{copy.ascendingNode}</span>
+                  <strong>{formatFixed(THREE.MathUtils.radToDeg(selectedOrbitOrientation.ascendingNode), 4)}°</strong>
+                </div>
+              </>
+            )}
             <div><span>{copy.scaleModel}</span><strong>{scaleMode === 'physical' ? 'Unified physical ratio' : 'Compressed visual scale'}</strong></div>
             <div><span>{copy.catalogue}</span><strong>Hipparcos bright subset / ICRS</strong></div>
             <div><span>{copy.lighting}</span><strong>Geometric eclipse + ring shadows</strong></div>
