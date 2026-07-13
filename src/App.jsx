@@ -21,7 +21,9 @@ const START_DATE = new Date();
 const PHYSICAL_KM_PER_UNIT = 50_000_000;
 const PHYSICAL_ORBIT_CAMERA_BIAS = new THREE.Vector3(0, 135, 125);
 const GALAXY_MAP_SIZE = 250;
-const GALAXY_MOBILE_FILL = 0.85;
+// Crop the square map beyond the short viewport edge so the galaxy disk fills
+// mobile screens while retaining roughly 90% of its visible structure.
+const GALAXY_MOBILE_FILL = 1.4;
 const MOBILE_LAYOUT_MAX_WIDTH = 1240;
 const EQJ_TO_ECL = Rotation_EQJ_ECL();
 const assetUrl = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
