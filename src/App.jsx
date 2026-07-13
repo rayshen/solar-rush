@@ -1072,13 +1072,13 @@ function createPhotographicMilkyWayBackdrop() {
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
 
-  // The source is rendered at its native 2:1 aspect ratio. Luminance controls
-  // alpha so its black sky dissolves into the scene instead of exposing a
-  // rectangular billboard, while the photographic dust lanes stay intact.
+  // This plane is fixed far beyond the solar system instead of being attached
+  // to the camera. Normal depth testing keeps every scene object in front,
+  // while the large distance makes camera movement produce only subtle parallax.
   const material = new THREE.ShaderMaterial({
     uniforms: {
       uMilkyWayMap: { value: texture },
-      uOpacity: { value: 0.74 },
+      uOpacity: { value: 0.82 },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -1099,25 +1099,25 @@ function createPhotographicMilkyWayBackdrop() {
           * smoothstep(0.0, 0.08, 1.0 - vUv.x)
           * smoothstep(0.0, 0.14, vUv.y)
           * smoothstep(0.0, 0.14, 1.0 - vUv.y);
-        vec3 liftedColor = pow(sampleColor.rgb, vec3(0.68)) * 0.86;
+        vec3 liftedColor = pow(sampleColor.rgb, vec3(0.72)) * 0.82;
         gl_FragColor = vec4(liftedColor, edgeFade * uOpacity);
       }
     `,
+    side: THREE.DoubleSide,
     transparent: true,
     depthWrite: false,
-    depthTest: false,
+    depthTest: true,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });
 
-  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(390, 195), material);
-  backdrop.position.set(-26, 38, -285);
+  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(2200, 1100), material);
+  backdrop.position.set(0, -1030, -1420);
+  backdrop.rotation.x = THREE.MathUtils.degToRad(-48);
   backdrop.rotation.z = THREE.MathUtils.degToRad(-2.2);
   backdrop.frustumCulled = false;
   backdrop.renderOrder = -100;
-  const group = new THREE.Group();
-  group.add(backdrop);
-  return group;
+  return backdrop;
 }
 
 function createSunMaterial() {
@@ -2436,8 +2436,6 @@ function buildSolarScene(mount, options) {
     galaxy.userData.depthDrift.value = rushingMode ? -forward * 2.4 : 0;
     galaxy.position.copy(camera.position);
     catalogStars.position.copy(camera.position);
-    milkyWay.position.copy(camera.position);
-    milkyWay.quaternion.copy(camera.quaternion);
     cameraLight.position.copy(camera.position);
     renderer.render(scene, camera);
 
