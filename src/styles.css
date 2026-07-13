@@ -447,6 +447,135 @@ p {
   white-space: nowrap;
 }
 
+.galaxy-feature-row {
+  display: grid;
+  width: 100%;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 8px;
+  margin: 2px 0;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.galaxy-feature-row:hover,
+.galaxy-feature-row.selected {
+  border-color: rgba(125, 248, 255, 0.2);
+  background: rgba(47, 95, 138, 0.11);
+}
+
+.galaxy-feature-row.selected {
+  box-shadow: inset 2px 0 0 rgba(125, 248, 255, 0.7);
+}
+
+.galaxy-feature-row.nested {
+  width: calc(100% - 12px);
+  margin-left: 12px;
+  opacity: 0.9;
+}
+
+.galaxy-feature-row strong,
+.galaxy-feature-row small,
+.galaxy-feature-row em {
+  display: block;
+  min-width: 0;
+}
+
+.galaxy-feature-row strong {
+  overflow: hidden;
+  color: #eef5ff;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.galaxy-feature-row small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #8599ba;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.galaxy-feature-row em {
+  grid-column: 2;
+  color: #9eb5d5;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.galaxy-feature-row em small {
+  margin-top: 2px;
+  color: #6f88aa;
+  font-size: 8px;
+}
+
+.galaxy-feature-mark {
+  width: 28px;
+  height: 28px;
+  border: 1px solid #7df8ff;
+  border-radius: 6px;
+  background-color: #091423;
+  background-position: center;
+  background-size: cover;
+  box-shadow: 0 0 8px rgba(125, 248, 255, 0.45);
+}
+
+.galaxy-feature-mark.feature-arms {
+  border-radius: 999px;
+  border-color: #b9eaff;
+}
+
+.galaxy-list-note {
+  margin: 12px 6px 4px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(143, 164, 196, 0.16);
+  color: #7187a8;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.galaxy-detail-symbol {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  border: 1px solid rgba(125, 248, 255, 0.42);
+  border-radius: 12px;
+  background:
+    radial-gradient(circle, rgba(255, 226, 163, 0.8) 0 5%, transparent 6%),
+    radial-gradient(circle, rgba(125, 248, 255, 0.18) 0 26%, transparent 28%),
+    rgba(9, 20, 35, 0.8);
+  box-shadow: inset 0 0 24px rgba(125, 248, 255, 0.09);
+  background-position: center;
+  background-size: cover;
+}
+
+.galaxy-detail-symbol.feature-arms {
+  border-radius: 999px;
+}
+
+.galaxy-stat-list {
+  margin-top: 10px;
+}
+
+.galaxy-stat-list div {
+  grid-template-columns: minmax(92px, 0.72fr) minmax(0, 1.28fr);
+}
+
+.galaxy-stat-list strong {
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.galaxy-source-note {
+  margin-top: 10px;
+}
+
 .body-hero {
   display: grid;
   grid-template-columns: 58px minmax(0, 1fr);
@@ -736,6 +865,57 @@ p {
 .view-switcher button {
   height: 42px;
   font-size: 13px;
+}
+
+.galaxy-view .view-switcher {
+  bottom: 14px;
+}
+
+.galaxy-view .bottom-bar {
+  display: none;
+}
+
+.galaxy-science-panel {
+  position: absolute;
+  bottom: 14px;
+  left: 228px;
+  display: grid;
+  width: min(430px, calc(100vw - 910px));
+  min-width: 330px;
+  gap: 5px;
+  padding: 11px 14px;
+  border: 1px solid rgba(139, 178, 230, 0.2);
+  border-radius: 8px;
+  background: rgba(4, 9, 18, 0.82);
+  backdrop-filter: blur(14px);
+}
+
+.galaxy-science-panel span,
+.galaxy-science-panel small {
+  color: #91a8c9;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.galaxy-science-panel strong {
+  color: #eaf8ff;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.view-subviews {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding-top: 7px;
+  border-top: 1px solid rgba(139, 178, 230, 0.16);
+}
+
+.view-subviews button {
+  height: 34px;
+  color: #9db1cf;
+  font-size: 11px;
 }
 
 .segmented {
@@ -1040,6 +1220,7 @@ kbd {
   .left-panel,
   .right-panel,
   .view-switcher,
+  .galaxy-science-panel,
   .bottom-bar {
     position: relative;
     z-index: 1;
@@ -1081,6 +1262,7 @@ kbd {
   .app-shell:not(.mobile-menu-open) .left-panel,
   .app-shell:not(.mobile-menu-open) .right-panel,
   .app-shell:not(.mobile-menu-open) .view-switcher,
+  .app-shell:not(.mobile-menu-open) .galaxy-science-panel,
   .app-shell:not(.mobile-menu-open) .bottom-bar {
     display: none;
   }
@@ -1231,11 +1413,31 @@ kbd {
     padding: 6px;
   }
 
+  .galaxy-view .view-switcher {
+    bottom: auto;
+  }
+
+  .galaxy-science-panel {
+    order: 2;
+    display: grid;
+    width: 100%;
+    min-width: 0;
+  }
+
   .view-switcher button {
     height: 40px;
     padding: 0 5px;
     font-size: 10px;
     line-height: 1.15;
+  }
+
+  .view-subviews {
+    gap: 5px;
+    padding-top: 5px;
+  }
+
+  .view-subviews button {
+    height: 34px;
   }
 
   .bottom-bar {

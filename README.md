@@ -72,6 +72,7 @@ The mobile layout keeps the 3D scene dominant and moves dense controls into an e
 - Planet positions use [Astronomy Engine](https://github.com/cosinekitty/astronomy) heliocentric vectors in the J2000 equatorial frame, transformed into the scene's J2000 ecliptic frame.
 - Major moon positions use compact J2000 mean-element propagation; they are visual approximations rather than Horizons/SPICE-grade satellite ephemerides.
 - The Milky Way is procedural rather than photographic, but its plane and Galactic center are transformed from Galactic coordinates into the J2000 catalogue sky. Density, bulge width, star clouds, and the central dust lane are visually modelled.
+- The face-on Galaxy subview uses ESA/Gaia's data-informed artist impression. Its Sun marker is calibrated to the annotated 8.2 kpc position; other structure labels are approximate anchors copied from the annotated model view, not measured boundaries. This is neither a photograph nor a full 3D stellar-density map.
 - Visual mode compresses body sizes and orbital distances independently for readability. Physical mode uses one unified scale: one scene unit equals 50 million kilometres.
 - `Artistic Spiral` motion trails express movement and depth; they are not a physical model of the Solar System's Galactic orbit.
 

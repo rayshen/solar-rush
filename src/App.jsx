@@ -35,6 +35,8 @@ const simulationSpeeds = [
 ];
 const DEFAULT_SPEED_INDEX = simulationSpeeds.findIndex(({ adaptiveOrbit }) => adaptiveOrbit);
 const DEFAULT_VIEW_MODE = 'helical';
+const DEFAULT_ORBIT_SCOPE = 'solar';
+const DEFAULT_HELICAL_VIEW = 'front';
 
 const viewModeLabels = {
   orbit: 'Orbit',
@@ -62,11 +64,16 @@ const ui = {
     scaleModel: 'Scale Model', catalogue: 'Star Catalogue', lighting: 'Lighting', source: 'NASA source',
     trueScale: 'True physical scale (1 unit = 50M km)', keepCentered: 'Keep selected body centered',
     orbitView: 'Orbit View', spiralView: 'Artistic Spiral', followView: 'Follow View', elapsed: 'Elapsed',
+    solarSystemView: 'Solar System', galaxyView: 'Milky Way',
+    spiralFrontView: 'Front View', spiralRearView: 'Rear View',
+    reconstruction: 'ESA/Gaia data-informed model view', sunGalacticRadius: 'Sun–center distance',
+    mapBoundary: 'Data-informed artist impression, not an external photograph or direct density map',
     drift: 'Forward drift', wheel: 'Wheel', zoom: 'Zoom', leftClick: 'Left drag', rotate: 'Rotate',
     rightClick: 'Right drag', pan: 'Pan', select: 'Select', focusBody: 'Focus body',
     inRange: 'EPHEMERIS IN RANGE', outRange: 'EPHEMERIS OUT OF RANGE',
     physicalScale: 'Unified scale: 1 scene unit = 50 million km.', visualScale: 'Visual scale: sizes and distances are compressed separately.',
     orbitDescription: 'Top-down system view for comparing positions and orbital scale.',
+    galaxyDescription: 'ESA/Gaia data-informed artist impression. The Solar System lies in the Orion Spur, about 26,600 light-years from the Galactic center.',
     helicalDescription: 'Artistic galactic-frame view; trails express motion, not a precise galactic orbit.',
     followDescription: 'Follow the selected body and emphasize its local system and trajectory.',
   },
@@ -81,13 +88,150 @@ const ui = {
     catalogue: '恒星目录', lighting: '光照模型', source: 'NASA 资料来源',
     trueScale: '真实物理比例（1 单位 = 5000 万 km）', keepCentered: '保持选中天体居中',
     orbitView: '轨道视图', spiralView: '艺术螺旋', followView: '跟随视图', elapsed: '已运行',
+    solarSystemView: '太阳系', galaxyView: '银河系',
+    spiralFrontView: '前方回望', spiralRearView: '后方前望',
+    reconstruction: 'ESA/Gaia 数据辅助模型图', sunGalacticRadius: '太阳—银心距离',
+    mapBoundary: '基于数据的艺术重建图，并非系外实拍或直接恒星密度图',
     drift: '前进距离', wheel: '滚轮', zoom: '缩放', leftClick: '左键拖动', rotate: '旋转',
     rightClick: '右键拖动', pan: '平移', select: '选择', focusBody: '聚焦天体',
     inRange: '星历有效范围内', outRange: '超出星历有效范围',
     physicalScale: '统一比例：1 场景单位 = 5000 万 km。', visualScale: '视觉比例：尺寸与距离分别压缩。',
     orbitDescription: '俯视完整轨道结构，适合比较行星位置与系统尺度。',
+    galaxyDescription: '基于 ESA/Gaia 数据制作的艺术重建俯视图：太阳系位于猎户支臂，距银心约 2.66 万光年。',
     helicalDescription: '艺术化银河惯性视图；光迹用于表达运动，不代表精确银河轨道。',
     followDescription: '跟随选中天体，仅突出它的主轨迹与局部系统。',
+  },
+};
+
+// `map` values are approximate scene anchors transcribed from ESA/Gaia's
+// annotated artist impression. Only the Solar System radius is numerically
+// calibrated (8.2 kpc); arm anchors do not represent measured boundaries.
+const galaxyFeatures = [
+  { id: 'galactic-center', group: 'core', name: 'Galactic Center', zh: '银河系中心', kind: 'Galactic location', kindZh: '银河系中心位置', map: [0, 0] },
+  { id: 'sgr-a', group: 'core', name: 'Sagittarius A*', zh: '人马座 A*', kind: 'Supermassive black hole', kindZh: '超大质量黑洞', map: [0, 0], nested: true },
+  { id: 'nuclear-cluster', group: 'core', name: 'Nuclear Star Cluster', zh: '核星团', kind: 'Dense central star cluster', kindZh: '致密中央星团', map: [0, 0], nested: true },
+  { id: 'bulge', group: 'core', name: 'Galactic Bulge', zh: '银河核球', kind: 'Dense stellar structure', kindZh: '致密恒星结构', map: [0, 0], nested: true },
+  { id: 'bar', group: 'core', name: 'Central Bar', zh: '中央棒', kind: 'Barred structure', kindZh: '棒状结构', map: [3, -20] },
+  { id: 'perseus', group: 'arms', name: 'Perseus Arm', zh: '英仙臂', kind: 'Major spiral arm', kindZh: '主要旋臂', map: [-44, 37] },
+  { id: 'outer', group: 'arms', name: 'Outer Arm', zh: '外臂', kind: 'Outer spiral arm', kindZh: '外侧旋臂', map: [-62, 45] },
+  { id: 'orion', group: 'arms', name: 'Orion Spur', zh: '猎户支臂', kind: 'Local spur · Sun', kindZh: '本地支臂 · 太阳', map: [-6, 54] },
+  { id: 'sagittarius-carina', group: 'arms', name: 'Sagittarius–Carina Arm', zh: '人马—船底臂', kind: 'Spiral arm', kindZh: '旋臂', map: [50, 47] },
+  { id: 'scutum-centaurus', group: 'arms', name: 'Scutum–Centaurus Arm', zh: '盾牌—半人马臂', kind: 'Major spiral arm', kindZh: '主要旋臂', map: [44, 31] },
+  { id: 'norma', group: 'arms', name: 'Norma Arm', zh: '矩尺臂', kind: 'Inner spiral arm', kindZh: '内侧旋臂', map: [31, 19] },
+  { id: 'near-3kpc', group: 'arms', name: 'Near 3 kpc Arm', zh: '近 3 kpc 臂', kind: 'Inner gas arm', kindZh: '内侧气体臂', map: [16, 14] },
+  { id: 'far-3kpc', group: 'arms', name: 'Far 3 kpc Arm', zh: '远 3 kpc 臂', kind: 'Inner gas arm', kindZh: '内侧气体臂', map: [-15, -9] },
+  { id: 'solar-neighborhood', group: 'locations', name: 'Solar Neighborhood', zh: '太阳邻域', kind: 'Local stellar neighborhood', kindZh: '本地恒星邻域', map: [4.7, 53.1], suppressMapLabel: true },
+  { id: 'proxima-centauri', group: 'locations', name: 'Proxima Centauri System', zh: '比邻星系统', kind: 'Nearest known exoplanet system', kindZh: '最近的已知系外行星系统', map: [4.7, 53.1], nested: true },
+  { id: 'trappist-1', group: 'locations', name: 'TRAPPIST-1 System', zh: 'TRAPPIST-1 系统', kind: 'Seven-planet system', kindZh: '七行星系统', map: [4.7, 53.1], nested: true },
+  { id: '55-cancri', group: 'locations', name: '55 Cancri System', zh: '巨蟹座 55 系统', kind: 'Five-planet system', kindZh: '五行星系统', map: [4.7, 53.1], nested: true },
+  { id: 'toi-700', group: 'locations', name: 'TOI-700 System', zh: 'TOI-700 系统', kind: 'Nearby M-dwarf system', kindZh: '邻近 M 型矮星系统', map: [4.7, 53.1], nested: true },
+  { id: 'hr-8799', group: 'locations', name: 'HR 8799 System', zh: 'HR 8799 系统', kind: 'Directly imaged system', kindZh: '直接成像行星系统', map: [4.7, 53.1], nested: true },
+  { id: 'solar-system', group: 'locations', name: 'Solar System', zh: '太阳系', kind: 'Our planetary system', kindZh: '我们的行星系统', map: [4.7, 53.1], nested: true },
+];
+
+const galaxyFeatureImages = {
+  'galactic-center': { file: 'bulge-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  'sgr-a': { file: 'sagittarius-a-eht.jpg', type: ['Observation · EHT', '观测图 · EHT'] },
+  'nuclear-cluster': { file: 'nuclear-star-cluster-hubble.jpg', type: ['Infrared observation · Hubble', '红外观测 · Hubble'] },
+  bulge: { file: 'bulge-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  bar: { file: 'bar-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  perseus: { file: 'perseus-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  outer: { file: 'outer-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  orion: { file: 'orion-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  'sagittarius-carina': { file: 'sagittarius-carina-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  'scutum-centaurus': { file: 'scutum-centaurus-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  norma: { file: 'norma-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  'near-3kpc': { file: 'near-3kpc-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  'far-3kpc': { file: 'far-3kpc-model.jpg', type: ['Model view · ESA/Gaia', '模型图 · ESA/Gaia'] },
+  'solar-neighborhood': { file: 'orion-model.jpg', type: ['Galaxy-scale locator', '银河尺度定位图'] },
+  'proxima-centauri': { file: 'orion-model.jpg', type: ['Unresolved at this scale', '当前尺度不可分辨'] },
+  'trappist-1': { file: 'orion-model.jpg', type: ['Unresolved at this scale', '当前尺度不可分辨'] },
+  '55-cancri': { file: 'orion-model.jpg', type: ['Unresolved at this scale', '当前尺度不可分辨'] },
+  'toi-700': { file: 'orion-model.jpg', type: ['Unresolved at this scale', '当前尺度不可分辨'] },
+  'hr-8799': { file: 'orion-model.jpg', type: ['Unresolved at this scale', '当前尺度不可分辨'] },
+  'solar-system': { file: 'orion-model.jpg', type: ['Calibrated model position · ESA/Gaia', '校准模型位置 · ESA/Gaia'] },
+};
+
+const galaxyFeatureDetails = {
+  'galactic-center': {
+    summary: ['The central region of the Milky Way, whose dynamical center is associated with Sagittarius A* and which contains nested structures at radically different scales.', '银河系中央区域；其动力学中心与人马座 A* 对应，并包含尺度差异巨大的嵌套结构。'],
+    facts: [['动力学中心', '与人马座 A* 对应'], ['内部结构', '人马座 A*、核星团、核球'], ['地图尺度', '在全银河视图中无法按比例分辨']],
+    factsEn: [['Dynamical center', 'Associated with Sagittarius A*'], ['Nested structures', 'Sgr A*, nuclear cluster, bulge'], ['Map scale', 'Not resolvable to scale in a Galaxy-wide view']],
+    source: 'https://science.nasa.gov/mission/webb/science-overview/science-explainers/what-is-the-center-of-our-galaxy-like/',
+  },
+  'sgr-a': {
+    summary: ['The compact radio source associated with the Milky Way’s central supermassive black hole.', '银河系中心超大质量黑洞对应的致密射电源。'],
+    facts: [['估算质量', '约 400 万个太阳质量'], ['物理角色', '银河系动力学中心'], ['地图表达', '定位符号，非比例实体']],
+    factsEn: [['Estimated mass', '~4 million solar masses'], ['Physical role', 'Galactic dynamical center'], ['Map representation', 'Locator symbol; not to scale']],
+    source: 'https://science.nasa.gov/mission/webb/science-overview/science-explainers/what-is-the-center-of-our-galaxy-like/',
+  },
+  'nuclear-cluster': {
+    summary: ['The Milky Way’s densest star cluster, surrounding Sagittarius A* and containing millions of stars.', '银河系最致密的星团，环绕人马座 A*，包含数百万颗恒星。'],
+    facts: [['观测范围', 'Hubble 红外拼接图约 50 光年'], ['已分辨恒星', '超过 50 万颗'], ['估计总量', '约 1000 万颗更暗恒星']],
+    factsEn: [['Observed field', 'Hubble infrared mosaic: ~50 ly'], ['Resolved stars', 'More than 500,000'], ['Estimated population', '~10 million fainter stars']],
+    source: 'https://science.nasa.gov/asset/hubble/milky-way-nuclear-star-cluster/',
+  },
+  bulge: {
+    summary: ['The vertically thick, box/peanut-shaped central stellar component associated with the Milky Way’s bar.', '与银河系中央棒相关、在侧视方向呈盒状/花生状的厚恒星结构。'],
+    facts: [['恒星数量', '约 100 亿颗，以老年红色恒星为主'], ['形态', '盒状/花生状，并含 X 形子结构'], ['尺度', '半长约 1 万光年；边界渐变']],
+    factsEn: [['Population', '~10 billion, mainly older red stars'], ['Morphology', 'Box/peanut-shaped with an X-shaped substructure'], ['Scale', 'Half-length ~10,000 ly; gradual boundary']],
+    source: 'https://sci.esa.int/web/gaia/-/58206-anatomy-of-the-milky-way',
+  },
+  bar: {
+    summary: ['The elongated stellar structure crossing the central bulge; its length and orientation remain model-dependent.', '穿过核球的拉长恒星结构；长度和方向仍依赖具体模型。'],
+    facts: [['结构类型', '棒旋星系中央恒星棒'], ['Gaia 结果', '方向比早期模型更倾斜'], ['不确定性', '长度与端点并非精确边界']],
+    factsEn: [['Structure', 'Central stellar bar'], ['Gaia result', 'More inclined than earlier models'], ['Uncertainty', 'Length and endpoints are model-dependent']],
+    source: 'https://www.esa.int/ESA_Multimedia/Images/2023/12/Top-down_view_of_the_Milky_Way_annotated',
+  },
+  perseus: { summary: ['A prominent outer stellar arm and one of the Milky Way’s major arms in the two-major-arm interpretation.', '显著的外侧恒星臂；在“两条主要恒星臂”模型中属于主臂。'], relation: ['Outside the Orion Spur', '猎户支臂外侧'] },
+  outer: { summary: ['A distant outer spiral feature whose far-side geometry remains comparatively uncertain.', '遥远的外侧旋臂结构，其银河背面几何形态仍有较大不确定性。'], relation: ['Outer Galactic disk', '银河盘外侧'] },
+  orion: { summary: ['The local spur containing the Sun, between the Sagittarius–Carina and Perseus arms.', '包含太阳的本地支臂，位于人马—船底臂与英仙臂之间。'], relation: ['Sun at 8.2 kpc from center', '太阳距银心 8.2 kpc'] },
+  'sagittarius-carina': { summary: ['A gas-rich spiral feature with active star-forming regions, also named Carina–Sagittarius when followed in the opposite direction.', '富含气体和恒星形成区的旋臂；按相反方向命名时也称“船底—人马臂”。'], relation: ['Inside the Orion Spur', '猎户支臂内侧'] },
+  'scutum-centaurus': { summary: ['A prominent stellar arm commonly called Scutum–Centaurus; the ESA model labels its mapped continuation as the Centaurus Arm.', '通常称为盾牌—半人马臂的显著恒星臂；ESA 模型将图中延伸段标为“半人马臂”。'], relation: ['Prominent stellar arm', '显著恒星臂'] },
+  norma: { summary: ['An inner spiral feature traced mainly by gas and young star-forming regions.', '主要由气体和年轻恒星形成区追踪的内侧旋臂结构。'], relation: ['Inner Galactic disk', '银河盘内侧'] },
+  'near-3kpc': { summary: ['A rapidly expanding inner gas feature near the central bar, not a conventional outer stellar arm.', '中央棒附近快速膨胀的内侧气体结构，并非常规外侧恒星臂。'], relation: ['Inner gas structure', '内侧气体结构'] },
+  'far-3kpc': { summary: ['The far-side counterpart to the Near 3 kpc Arm, identified through radio observations of Galactic gas.', '近 3 kpc 臂在银心远侧的对应结构，由银河气体射电观测识别。'], relation: ['Far-side inner gas structure', '远侧内层气体结构'] },
+  'solar-neighborhood': {
+    summary: ['The local region around the Sun. The representative planetary systems below are grouped at one locator because their separations cannot be resolved on a Galaxy-wide map.', '太阳周围的本地空间区域。下列代表性行星系统在银河全景尺度无法分开，因此共用一个定位点。'],
+    facts: [['地图定位', '猎户支臂内，距银心约 8.2 kpc'], ['当前图比例', '约 1 场景单位 = 500 光年'], ['表达限制', '邻近系统不按像素级间距分散绘制']],
+    factsEn: [['Map location', 'Orion Spur, ~8.2 kpc from center'], ['Current map scale', '~1 scene unit = 500 ly'], ['Representation', 'Nearby systems are not spread using false pixel-scale offsets']],
+    source: 'https://science.nasa.gov/exoplanets/big-questions/',
+  },
+  'proxima-centauri': {
+    summary: ['The nearest known exoplanet system, around Proxima Centauri, the closest star to the Sun and a member of the Alpha Centauri triple system.', '距离太阳最近的已知系外行星系统；其宿主比邻星是离太阳最近的恒星，也是南门二三星系统成员。'],
+    facts: [['距太阳', '约 4.24 光年'], ['宿主恒星', '红矮星 · 南门二三星系统成员'], ['代表行星', '比邻星 b']],
+    factsEn: [['Distance from Sun', '~4.24 ly'], ['Host star', 'Red dwarf · Alpha Centauri triple member'], ['Representative planet', 'Proxima b']],
+    source: 'https://science.nasa.gov/universe/exoplanets/eso-discovers-earth-size-planet-in-habitable-zone-of-nearest-star/',
+  },
+  'trappist-1': {
+    summary: ['An ultracool red-dwarf system with seven known Earth-sized rocky planets.', '一颗超冷红矮星及其七颗已知地球大小岩质行星组成的系统。'],
+    facts: [['距太阳', '约 40 光年'], ['已知行星', '7 颗'], ['行星类型', '均为地球大小的岩质行星']],
+    factsEn: [['Distance from Sun', '~40 ly'], ['Known planets', '7'], ['Planet type', 'All Earth-sized rocky worlds']],
+    source: 'https://science.nasa.gov/exoplanets/trappist1/',
+  },
+  '55-cancri': {
+    summary: ['A nearby binary-star system with at least five known planets orbiting the primary star, 55 Cancri A.', '邻近双星系统；至少五颗已知行星围绕主星巨蟹座 55 A 运行。'],
+    facts: [['距太阳', '约 41 光年'], ['恒星结构', '双星系统'], ['已知行星', '至少 5 颗']],
+    factsEn: [['Distance from Sun', '~41 ly'], ['Stellar structure', 'Binary system'], ['Known planets', 'At least 5']],
+    source: 'https://science.nasa.gov/solar-system/skywatching/night-sky-network/dim-delights-in-cancer/',
+  },
+  'toi-700': {
+    summary: ['A nearby M-dwarf planetary system containing the roughly Earth-sized planets TOI-700 d and e in the star’s habitable zone.', '邻近 M 型矮星行星系统，包含位于宜居带内、大小接近地球的 TOI-700 d 和 e。'],
+    facts: [['距太阳', '约 100 光年'], ['宿主恒星', 'M 型矮星'], ['代表行星', '宜居带内的 TOI-700 d、e']],
+    factsEn: [['Distance from Sun', '~100 ly'], ['Host star', 'M dwarf'], ['Representative planets', 'Habitable-zone TOI-700 d and e']],
+    source: 'https://science.nasa.gov/exoplanet-catalog/toi-700-e/',
+  },
+  'hr-8799': {
+    summary: ['A young nearby system famous for four giant exoplanets that have been directly imaged.', '一个年轻的邻近系统，以四颗已被直接成像的巨型系外行星闻名。'],
+    facts: [['距太阳', '约 130 光年'], ['已成像行星', '4 颗巨型行星'], ['科学意义', '多行星直接成像基准系统']],
+    factsEn: [['Distance from Sun', '~130 ly'], ['Imaged planets', '4 giant planets'], ['Scientific role', 'Benchmark directly imaged multiplanet system']],
+    source: 'https://science.nasa.gov/missions/webb/nasas-webb-images-young-giant-exoplanets-detects-carbon-dioxide/',
+  },
+  'solar-system': {
+    summary: ['Our planetary system’s location in the Orion Spur, calibrated to the ESA/Gaia map at a Galactocentric radius of about 8.2 kpc.', '太阳系位于猎户支臂；在 ESA/Gaia 地图中按约 8.2 kpc 的银心距离校准。'],
+    facts: [['距银心距离', '约 8.2 kpc · 26,600 光年'], ['所在结构', '猎户支臂'], ['绕银心周期', '约 2.3 亿年']],
+    factsEn: [['Galactocentric radius', '~8.2 kpc · 26,600 ly'], ['Local structure', 'Orion Spur'], ['Galactic orbital period', '~230 million years']],
+    source: 'https://science.nasa.gov/solar-system/solar-system-facts/',
   },
 };
 
@@ -525,6 +669,186 @@ function getRushingTrailPoint(body, currentPosition, sunPosition, progress, mode
   return out;
 }
 
+function createGalaxyLabel(text, accent = '#dceaff', displayHeight = 5.4) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  const fontSize = 30;
+  const horizontalPadding = 34;
+  const verticalPadding = 24;
+  ctx.font = `600 ${fontSize}px Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif`;
+  const textWidth = Math.ceil(ctx.measureText(text).width);
+  canvas.width = textWidth + horizontalPadding * 2;
+  canvas.height = fontSize + verticalPadding * 2;
+  ctx.font = `600 ${fontSize}px Inter, "PingFang SC", "Microsoft YaHei", Arial, sans-serif`;
+  ctx.fillStyle = 'rgba(3, 8, 17, 0.78)';
+  ctx.strokeStyle = 'rgba(125, 248, 255, 0.28)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(2, 2, canvas.width - 4, canvas.height - 4, 12);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = accent;
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, horizontalPadding, canvas.height / 2);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: texture,
+    transparent: true,
+    depthWrite: false,
+  }));
+  sprite.scale.set(displayHeight * (canvas.width / canvas.height), displayHeight, 1);
+  return sprite;
+}
+
+function createGalaxyMap() {
+  const group = new THREE.Group();
+  group.visible = false;
+  const galaxyTexture = loadBodyTexture(assetUrl('/textures/galaxy/gaia-milky-way-face-on.jpg'), { color: true });
+  galaxyTexture.anisotropy = 8;
+  const galaxyDisk = new THREE.Mesh(
+    new THREE.PlaneGeometry(250, 250),
+    new THREE.MeshBasicMaterial({
+      map: galaxyTexture,
+      transparent: true,
+      opacity: 0.98,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    }),
+  );
+  galaxyDisk.rotation.x = -Math.PI / 2;
+  galaxyDisk.position.y = -1.4;
+  group.add(galaxyDisk);
+
+  const selectionMarker = new THREE.Group();
+  selectionMarker.position.y = 3.1;
+  const selectionHalo = new THREE.Mesh(
+    new THREE.RingGeometry(2.15, 2.48, 56),
+    new THREE.MeshBasicMaterial({
+      color: '#7df8ff',
+      transparent: true,
+      opacity: 0.48,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  selectionHalo.rotation.x = -Math.PI / 2;
+  const selectionOuterHalo = new THREE.Mesh(
+    new THREE.RingGeometry(3.05, 3.16, 56),
+    new THREE.MeshBasicMaterial({
+      color: '#7df8ff',
+      transparent: true,
+      opacity: 0.12,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  selectionOuterHalo.rotation.x = -Math.PI / 2;
+  selectionMarker.add(selectionHalo, selectionOuterHalo);
+  group.add(selectionMarker);
+
+  // Calibrated against the Sun marker in ESA/Gaia's annotated 4000 px map.
+  // The marker is about (75, 850) px from the Galactic center, representing
+  // the measured 8.2 kpc radius; the 250-unit plane maps that to (4.7, 53.1).
+  const sunPosition = new THREE.Vector3(4.7, 1.8, 53.1);
+  const marker = new THREE.Group();
+  marker.position.copy(sunPosition);
+  const markerDot = new THREE.Mesh(
+    new THREE.CircleGeometry(0.28, 24),
+    new THREE.MeshBasicMaterial({ color: '#fff2a8', side: THREE.DoubleSide, depthWrite: false }),
+  );
+  markerDot.rotation.x = -Math.PI / 2;
+  const sunCrossGeometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-1.15, 0, 0), new THREE.Vector3(-0.42, 0, 0),
+    new THREE.Vector3(0.42, 0, 0), new THREE.Vector3(1.15, 0, 0),
+    new THREE.Vector3(0, 0, -1.15), new THREE.Vector3(0, 0, -0.42),
+    new THREE.Vector3(0, 0, 0.42), new THREE.Vector3(0, 0, 1.15),
+  ]);
+  const sunCross = new THREE.LineSegments(
+    sunCrossGeometry,
+    new THREE.LineBasicMaterial({ color: '#7df8ff', transparent: true, opacity: 0.92 }),
+  );
+  marker.add(markerDot, sunCross);
+  const sunLabels = {
+    zh: createGalaxyLabel('太阳邻域 · 猎户支臂', '#eaffff', 4.8),
+    en: createGalaxyLabel('Solar Neighborhood · Orion Spur', '#eaffff', 4.8),
+  };
+  for (const label of Object.values(sunLabels)) {
+    label.position.set(label.scale.x / 2 + 1.1, 4.8, 0);
+    label.userData.baseScale = label.scale.clone();
+    marker.add(label);
+  }
+  group.add(marker);
+
+  // This is a cartographic locator, not a physical rendering of Sagittarius A*.
+  // The map texture already represents the luminous nuclear bulge and cluster.
+  const centerMarker = new THREE.Group();
+  centerMarker.position.y = 1;
+  const centerRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.75, 1.05, 40),
+    new THREE.MeshBasicMaterial({
+      color: '#ffd27a',
+      transparent: true,
+      opacity: 0.9,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    }),
+  );
+  centerRing.rotation.x = -Math.PI / 2;
+  const centerCrossGeometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-1.65, 0, 0), new THREE.Vector3(-0.65, 0, 0),
+    new THREE.Vector3(0.65, 0, 0), new THREE.Vector3(1.65, 0, 0),
+    new THREE.Vector3(0, 0, -1.65), new THREE.Vector3(0, 0, -0.65),
+    new THREE.Vector3(0, 0, 0.65), new THREE.Vector3(0, 0, 1.65),
+  ]);
+  const centerCross = new THREE.LineSegments(
+    centerCrossGeometry,
+    new THREE.LineBasicMaterial({ color: '#ffd27a', transparent: true, opacity: 0.82 }),
+  );
+  centerMarker.add(centerRing, centerCross);
+  group.add(centerMarker);
+  const centerLabels = {
+    zh: createGalaxyLabel('银河系中心', '#ffe2a3', 5.1),
+    en: createGalaxyLabel('Galactic Center', '#ffe2a3', 5.1),
+  };
+  for (const label of Object.values(centerLabels)) {
+    label.position.set(label.scale.x / 2 + 1.25, 5.2, 0);
+    label.userData.baseScale = label.scale.clone();
+    group.add(label);
+  }
+  const featureLabels = {};
+  const hitTargets = [];
+  for (const feature of galaxyFeatures.filter((item) => item.map && !item.suppressMapLabel)) {
+    const labels = {
+      zh: createGalaxyLabel(feature.zh, '#b9eaff', 2.7),
+      en: createGalaxyLabel(feature.name, '#b9eaff', 2.7),
+    };
+    for (const label of Object.values(labels)) {
+      label.position.set(feature.map[0], 2.5, feature.map[1]);
+      label.userData.baseScale = label.scale.clone();
+      group.add(label);
+    }
+    featureLabels[feature.id] = labels;
+  }
+  for (const feature of galaxyFeatures.filter((item) => item.map)) {
+    const hitTarget = new THREE.Mesh(
+      new THREE.CircleGeometry(feature.group === 'locations' ? 3.8 : 3.2, 24),
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+    );
+    hitTarget.rotation.x = -Math.PI / 2;
+    hitTarget.position.set(feature.map[0], 3.25, feature.map[1]);
+    hitTarget.userData.galaxyFeatureId = feature.id;
+    group.add(hitTarget);
+    hitTargets.push(hitTarget);
+  }
+  return {
+    group,
+    selectionMarker,
+    hitTargets,
+    labels: { sun: sunLabels, center: centerLabels, features: featureLabels },
+  };
+}
+
 function createStarField(starTexture) {
   const depthDrift = { value: 0 };
   const createDriftingMaterial = (options) => {
@@ -790,15 +1114,18 @@ function createSunMaterial() {
         float heat = clamp(broad * 0.82 + cells * 0.42 + filaments * 0.3, 0.0, 1.35);
         float granules = smoothstep(0.48, 0.78, cells + filaments * 0.28);
 
-        vec3 color = vec3(0.82, 0.075, 0.002) + surfaceDetail * vec3(0.92, 0.32, 0.055);
-        color *= mix(0.88, 1.28, smoothstep(0.24, 1.02, heat));
-        color += vec3(1.55, 0.72, 0.08) * granules * 0.82;
-        color = mix(color, vec3(1.72, 0.88, 0.2), filaments * 0.28);
+        // Preserve the observed photosphere instead of tinting the whole star
+        // deep orange. The warmer fringe is added separately below.
+        vec3 photosphere = surfaceDetail * vec3(1.16, 0.86, 0.5);
+        vec3 color = vec3(0.34, 0.055, 0.002) + photosphere;
+        color *= mix(0.9, 1.18, smoothstep(0.24, 1.02, heat));
+        color += vec3(1.18, 0.58, 0.09) * granules * 0.48;
+        color = mix(color, vec3(1.5, 0.78, 0.22), filaments * 0.18);
 
         float facing = clamp(dot(normalize(vWorldNormal), normalize(vViewDirection)), 0.0, 1.0);
         float limb = pow(facing, 0.42);
-        color *= mix(0.88, 1.12, limb);
-        color += vec3(1.25, 0.42, 0.015) * filaments * 0.24;
+        color *= mix(0.76, 1.1, limb);
+        color += vec3(1.1, 0.35, 0.012) * filaments * 0.16;
         gl_FragColor = vec4(color, 1.0);
       }
     `,
@@ -1286,7 +1613,9 @@ function buildSolarScene(mount, options) {
   scene.background = new THREE.Color('#03060d');
 
   const camera = new THREE.PerspectiveCamera(54, mount.clientWidth / mount.clientHeight, 0.05, 800);
-  if (options.getState().viewMode === 'helical') camera.position.set(-20, 14, 43);
+  if (options.getState().viewMode === 'helical') {
+    camera.position.set(...(options.getState().helicalView === 'rear' ? [32, 22, -70] : [-20, 14, 43]));
+  }
   else camera.position.set(0, 42, 38);
 
   const renderer = new THREE.WebGLRenderer({
@@ -1310,7 +1639,9 @@ function buildSolarScene(mount, options) {
   controls.maxDistance = 240;
   controls.panSpeed = 0.72;
   controls.rotateSpeed = 0.66;
-  if (options.getState().viewMode === 'helical') controls.target.set(0, 0, -11);
+  if (options.getState().viewMode === 'helical') {
+    controls.target.set(0, 0, options.getState().helicalView === 'rear' ? 11 : -11);
+  }
 
   // Keep a small cool floor so texture detail survives in space without
   // flattening the day/night boundary created by the Sun.
@@ -1337,6 +1668,8 @@ function buildSolarScene(mount, options) {
   scene.add(catalogStars);
   const milkyWay = createMilkyWayBand(starTexture);
   scene.add(milkyWay);
+  const galaxyMap = createGalaxyMap();
+  scene.add(galaxyMap.group);
 
   const systemRoot = new THREE.Group();
   scene.add(systemRoot);
@@ -1347,6 +1680,7 @@ function buildSolarScene(mount, options) {
   scene.add(sunMotionLine.group);
 
   const bodyNodes = new Map();
+  const bodyHitTargets = [];
   const orbitPivots = new Map();
   const worldPositions = new Map();
   const orbitLines = [];
@@ -1404,6 +1738,8 @@ function buildSolarScene(mount, options) {
       ? createSunMaterial()
       : createPlanetMaterial(body);
     const mesh = new THREE.Mesh(geometry, material);
+    mesh.userData.bodyId = body.id;
+    bodyHitTargets.push(mesh);
     mesh.rotation.z = THREE.MathUtils.degToRad(body.axialTilt);
     if (body.id === 'phobos') mesh.scale.set(1.38, 0.9, 0.78);
     if (body.id === 'deimos') mesh.scale.set(1.24, 0.92, 0.82);
@@ -1549,10 +1885,45 @@ function buildSolarScene(mount, options) {
   let cameraTransition = 1;
   let lastSelectedId = '';
   let lastViewMode = '';
+  let lastOrbitScope = '';
+  let lastHelicalView = '';
   let lastCameraRevision = -1;
+  const raycaster = new THREE.Raycaster();
+  const pointer = new THREE.Vector2();
+  const pointerStart = new THREE.Vector2();
   const trailPoint = new THREE.Vector3();
   const physicalRadiusFor = (body) => body.radiusKm / PHYSICAL_KM_PER_UNIT;
   const physicalOrbitFor = (body) => body.distanceKm / PHYSICAL_KM_PER_UNIT;
+
+  const updatePointer = (event) => {
+    const bounds = renderer.domElement.getBoundingClientRect();
+    pointer.set(
+      ((event.clientX - bounds.left) / bounds.width) * 2 - 1,
+      -((event.clientY - bounds.top) / bounds.height) * 2 + 1,
+    );
+  };
+  const pickSceneTarget = (event, commit = false) => {
+    updatePointer(event);
+    raycaster.setFromCamera(pointer, camera);
+    const state = options.getState();
+    const galaxyView = state.viewMode === 'orbit' && state.orbitScope === 'galaxy';
+    const hits = raycaster.intersectObjects(galaxyView ? galaxyMap.hitTargets : bodyHitTargets, false);
+    const hit = hits[0]?.object;
+    renderer.domElement.style.cursor = hit ? 'pointer' : 'grab';
+    if (!commit || !hit) return;
+    if (galaxyView) options.onSelectGalaxyFeature?.(hit.userData.galaxyFeatureId);
+    else options.onSelectBody?.(hit.userData.bodyId);
+  };
+  const onPointerDown = (event) => pointerStart.set(event.clientX, event.clientY);
+  const onPointerMove = (event) => pickSceneTarget(event);
+  const onPointerUp = (event) => {
+    if (pointerStart.distanceTo(new THREE.Vector2(event.clientX, event.clientY)) <= 5) {
+      pickSceneTarget(event, true);
+    }
+  };
+  renderer.domElement.addEventListener('pointerdown', onPointerDown);
+  renderer.domElement.addEventListener('pointermove', onPointerMove);
+  renderer.domElement.addEventListener('pointerup', onPointerUp);
 
   const updateSunMotionLine = (mode, selectedId) => {
     const sunPosition = worldPositions.get('sun') ?? targetPosition;
@@ -1734,13 +2105,64 @@ function buildSolarScene(mount, options) {
         : 1;
       item.orbit.scale.setScalar(ratio);
     }
+    const galaxyView = state.viewMode === 'orbit' && state.orbitScope === 'galaxy';
+    systemRoot.visible = !galaxyView;
+    helicalTrailGroup.visible = !galaxyView;
+    sunMotionLine.group.visible = !galaxyView && sunMotionLine.group.visible;
+    galaxyMap.group.visible = galaxyView;
+    if (galaxyView) galaxyMap.group.rotation.y += delta * 0.018;
+    const selectedMapFeature = galaxyFeatures.find((feature) => feature.id === state.selectedGalaxyFeature);
+    const [selectionX, selectionZ] = selectedMapFeature?.map ?? [0, 0];
+    const selectionAtGalacticCenter = selectionX === 0 && selectionZ === 0;
+    const selectionAtSolarNeighborhood = selectionX === 4.7 && selectionZ === 53.1;
+    galaxyMap.selectionMarker.position.set(selectionX, 3.1, selectionZ);
+    galaxyMap.selectionMarker.visible = galaxyView;
+    const markerPulse = 1 + Math.sin(visualTime * 3.2) * 0.08;
+    galaxyMap.selectionMarker.scale.setScalar(markerPulse);
+    for (const [labelLanguage, label] of Object.entries(galaxyMap.labels.sun)) {
+      label.visible = galaxyView
+        && labelLanguage === state.language
+        && (!selectionAtSolarNeighborhood || state.selectedGalaxyFeature === 'solar-neighborhood');
+      label.material.opacity = state.selectedGalaxyFeature === 'solar-neighborhood' ? 1 : 0.72;
+      label.scale.copy(label.userData.baseScale).multiplyScalar(
+        state.selectedGalaxyFeature === 'solar-neighborhood' ? 1.1 : 1,
+      );
+    }
+    for (const [labelLanguage, label] of Object.entries(galaxyMap.labels.center)) {
+      label.visible = galaxyView && labelLanguage === state.language && !selectionAtGalacticCenter;
+      label.material.opacity = 0.72;
+      label.scale.copy(label.userData.baseScale);
+    }
+    for (const [featureId, labels] of Object.entries(galaxyMap.labels.features)) {
+      const labelFeature = galaxyFeatures.find((feature) => feature.id === featureId);
+      const labelAtGalacticCenter = labelFeature?.map?.[0] === 0 && labelFeature?.map?.[1] === 0;
+      const labelAtSolarNeighborhood = labelFeature?.map?.[0] === 4.7 && labelFeature?.map?.[1] === 53.1;
+      for (const [labelLanguage, label] of Object.entries(labels)) {
+        label.visible = galaxyView
+          && labelLanguage === state.language
+          && (!labelAtGalacticCenter || featureId === state.selectedGalaxyFeature)
+          && (!labelAtSolarNeighborhood || featureId === state.selectedGalaxyFeature);
+        label.material.opacity = featureId === state.selectedGalaxyFeature ? 0.96 : 0.56;
+        label.scale.copy(label.userData.baseScale).multiplyScalar(
+          featureId === state.selectedGalaxyFeature ? 1.12 : 1,
+        );
+      }
+    }
+    galaxy.visible = !galaxyView;
+    milkyWay.visible = !galaxyView;
+    catalogStars.visible = !galaxyView;
     updateSunMotionLine(state.viewMode, state.selectedId);
     updateHelicalTrails(state.viewMode, state.selectedId);
+    if (galaxyView) {
+      sunMotionLine.group.visible = false;
+      helicalTrailGroup.visible = false;
+    }
 
     sunLight.position.copy(worldPositions.get('sun'));
     const selected = bodyNodes.get(state.selectedId) ?? bodyNodes.get('sun');
     selected.group.getWorldPosition(targetPosition);
-    cameraFocusPosition.copy(state.viewMode === 'orbit' ? worldPositions.get('sun') : targetPosition);
+    if (galaxyView) galaxyMap.selectionMarker.getWorldPosition(cameraFocusPosition);
+    else cameraFocusPosition.copy(state.viewMode === 'orbit' ? worldPositions.get('sun') : targetPosition);
 
     const selectedBody = selected.body;
     const selectedSceneRadius = state.scaleMode === 'physical'
@@ -1752,22 +2174,34 @@ function buildSolarScene(mount, options) {
         ? 18
         : 4.2;
     let cameraBias;
-    if (state.viewMode === 'orbit') {
+    if (galaxyView) {
+      cameraBias = new THREE.Vector3(0, 94, 18);
+    } else if (state.viewMode === 'orbit') {
       cameraBias = state.scaleMode === 'physical'
         ? PHYSICAL_ORBIT_CAMERA_BIAS
         : selectedBody.type === 'star'
           ? new THREE.Vector3(0, 42, 38)
         : new THREE.Vector3(distance * 1.25, distance * 0.72, distance * 1.35);
     } else if (state.viewMode === 'helical') {
+      const viewDirection = state.helicalView === 'rear' ? -1 : 1;
       cameraBias = selectedBody.type === 'star'
-        ? new THREE.Vector3(-20, 14, 43)
-        : new THREE.Vector3(-distance * 0.96, distance * 0.44, distance * 0.92);
+        ? state.helicalView === 'rear'
+          ? new THREE.Vector3(32, 22, -70)
+          : new THREE.Vector3(-20, 14, 43)
+        : new THREE.Vector3(
+          -distance * (state.helicalView === 'rear' ? 1.55 : 0.96) * viewDirection,
+          distance * (state.helicalView === 'rear' ? 0.7 : 0.44),
+          distance * (state.helicalView === 'rear' ? 1.5 : 0.92) * viewDirection,
+        );
     } else {
       cameraBias = selectedBody.type === 'star'
         ? new THREE.Vector3(-8, 6.5, 15)
         : new THREE.Vector3(selectedSceneRadius * 7 + 7, selectedSceneRadius * 2.2 + 2.4, selectedSceneRadius * 4.4 + 7);
     }
-    controls.minDistance = selectedSceneRadius * (selectedBody.type === 'star' ? 1.68 : 1.18);
+    controls.minDistance = galaxyView ? 72 : selectedSceneRadius * (selectedBody.type === 'star' ? 1.68 : 1.18);
+    controls.maxDistance = galaxyView ? 310 : 240;
+    controls.minPolarAngle = galaxyView ? 0.08 : 0;
+    controls.maxPolarAngle = galaxyView ? 0.52 : Math.PI;
     if (state.viewMode === 'follow' && selectedBody.type !== 'star') {
       const sunPosition = worldPositions.get('sun') ?? targetPosition;
       followSunVector.copy(sunPosition).sub(targetPosition).normalize();
@@ -1786,15 +2220,22 @@ function buildSolarScene(mount, options) {
       cameraGoal.copy(cameraFocusPosition).add(cameraBias);
     }
     lookAtGoal.copy(cameraFocusPosition);
-    if (state.viewMode === 'helical') lookAtGoal.z -= selectedBody.type === 'star' ? 11 : 6.5;
+    if (state.viewMode === 'helical') {
+      const lookDistance = selectedBody.type === 'star' ? 11 : 6.5;
+      lookAtGoal.z += state.helicalView === 'rear' ? lookDistance : -lookDistance;
+    }
 
     const cameraTargetChanged = state.selectedId !== lastSelectedId
       || state.viewMode !== lastViewMode
+      || state.orbitScope !== lastOrbitScope
+      || state.helicalView !== lastHelicalView
       || state.cameraRevision !== lastCameraRevision;
     if (cameraTargetChanged) {
       cameraTransition = 1;
       lastSelectedId = state.selectedId;
       lastViewMode = state.viewMode;
+      lastOrbitScope = state.orbitScope;
+      lastHelicalView = state.helicalView;
       lastCameraRevision = state.cameraRevision;
       previousTarget.copy(cameraFocusPosition);
     }
@@ -1878,6 +2319,9 @@ function buildSolarScene(mount, options) {
     dispose() {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
+      renderer.domElement.removeEventListener('pointerdown', onPointerDown);
+      renderer.domElement.removeEventListener('pointermove', onPointerMove);
+      renderer.domElement.removeEventListener('pointerup', onPointerUp);
       controls.dispose();
       renderer.dispose();
       renderer.domElement.remove();
@@ -1912,6 +2356,31 @@ function BodyButton({ body, selectedId, onSelect, locale, language, nested = fal
   );
 }
 
+function GalaxyFeatureButton({ feature, selectedId, language, onSelect }) {
+  const image = galaxyFeatureImages[feature.id];
+  return (
+    <button
+      type="button"
+      className={`galaxy-feature-row ${feature.nested ? 'nested' : ''} ${selectedId === feature.id ? 'selected' : ''}`}
+      onClick={() => onSelect(feature.id)}
+    >
+      <span
+        className={`galaxy-feature-mark feature-${feature.group}`}
+        style={{ backgroundImage: `url(${assetUrl(`/textures/galaxy/features/${image.file}`)})` }}
+        aria-hidden="true"
+      />
+      <span>
+        <strong>{language === 'zh' ? feature.zh : feature.name}</strong>
+        <small>{language === 'zh' ? feature.name : feature.zh}</small>
+      </span>
+      <em>
+        {language === 'zh' ? feature.kindZh : feature.kind}
+        <small>{image.type[language === 'zh' ? 1 : 0]}</small>
+      </em>
+    </button>
+  );
+}
+
 function AtmosphereIcon({ className = '' }) {
   return (
     <svg className={className} viewBox="0 0 24 24" aria-hidden="true">
@@ -1930,9 +2399,12 @@ function App() {
   const [playing, setPlaying] = useState(true);
   const [autoFollow, setAutoFollow] = useState(true);
   const [viewMode, setViewMode] = useState(DEFAULT_VIEW_MODE);
+  const [orbitScope, setOrbitScope] = useState(DEFAULT_ORBIT_SCOPE);
+  const [helicalView, setHelicalView] = useState(DEFAULT_HELICAL_VIEW);
   const [scaleMode, setScaleMode] = useState('visual');
   const [language, setLanguage] = useState(() => localStorage.getItem('solar-rush-language') || 'zh');
   const [detailTab, setDetailTab] = useState('overview');
+  const [selectedGalaxyFeature, setSelectedGalaxyFeature] = useState('solar-system');
   const [additionalDataOpen, setAdditionalDataOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [cameraRevision, setCameraRevision] = useState(0);
@@ -1946,6 +2418,8 @@ function App() {
   });
 
   const selectedBody = bodyMap[selectedId] ?? bodyMap.sun;
+  const selectedGalacticStructure = galaxyFeatures.find((feature) => feature.id === selectedGalaxyFeature) ?? galaxyFeatures[0];
+  const selectedGalacticDetails = galaxyFeatureDetails[selectedGalacticStructure.id];
   const copy = ui[language];
   const locale = language === 'zh' ? 'zh-CN' : 'en-US';
   const bodyDetails = getBodyDetails(selectedBody);
@@ -1986,9 +2460,17 @@ function App() {
     });
   }, [filter]);
   const visibleIds = useMemo(() => new Set(visibleBodies.map((body) => body.id)), [visibleBodies]);
+  const visibleGalaxyFeatures = useMemo(() => {
+    const normalizedFilter = filter.trim().toLowerCase();
+    if (!normalizedFilter) return galaxyFeatures;
+    return galaxyFeatures.filter((feature) => (
+      `${feature.name} ${feature.zh} ${feature.kind} ${feature.kindZh}`.toLowerCase().includes(normalizedFilter)
+    ));
+  }, [filter]);
   const planets = useMemo(() => bodies.filter((body) => body.type === 'planet'), []);
   const switchViewMode = (mode) => {
     setViewMode(mode);
+    if (mode === 'orbit') setOrbitScope(DEFAULT_ORBIT_SCOPE);
     setAutoFollow(true);
     setCameraRevision((value) => value + 1);
     setMobileMenuOpen(false);
@@ -2036,7 +2518,11 @@ function App() {
     playing,
     autoFollow,
     viewMode,
+    orbitScope,
+    helicalView,
     scaleMode,
+    language,
+    selectedGalaxyFeature,
     cameraRevision,
   };
 
@@ -2046,6 +2532,16 @@ function App() {
     let lastPlaying = stateRef.current.playing;
     const scene = buildSolarScene(mountRef.current, {
       getState: () => stateRef.current,
+      onSelectBody: (id) => {
+        setSelectedId(id);
+        setAutoFollow(true);
+        setCameraRevision((value) => value + 1);
+      },
+      onSelectGalaxyFeature: (id) => {
+        setSelectedGalaxyFeature(id);
+        setAutoFollow(true);
+        setCameraRevision((value) => value + 1);
+      },
       onTick: (nextTelemetry) => {
         const now = performance.now();
         const playingChanged = stateRef.current.playing !== lastPlaying;
@@ -2090,7 +2586,7 @@ function App() {
   });
 
   return (
-    <main className={`app-shell ${mobileMenuOpen ? 'mobile-menu-open' : ''}`}>
+    <main className={`app-shell ${mobileMenuOpen ? 'mobile-menu-open' : ''} ${viewMode === 'orbit' && orbitScope === 'galaxy' ? 'galaxy-view' : ''}`}>
       <section ref={mountRef} className="space-stage" aria-label={language === 'zh' ? '3D 太阳系模拟器' : '3D Solar System Simulator'} />
 
       <header className="top-bar">
@@ -2155,6 +2651,54 @@ function App() {
       </header>
 
       <aside className="left-panel glass-panel">
+        {viewMode === 'orbit' && orbitScope === 'galaxy' ? (
+          <>
+            <div className="panel-title">
+              <span>{language === 'zh' ? '银河系结构' : 'Galactic Structures'}</span>
+              <strong>{galaxyFeatures.length}</strong>
+            </div>
+            <label className="search-box">
+              <input
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder={language === 'zh' ? '搜索旋臂或结构' : 'Search arms or structures'}
+              />
+            </label>
+            {['core', 'arms', 'locations'].map((group) => {
+              const features = visibleGalaxyFeatures.filter((feature) => feature.group === group);
+              if (features.length === 0) return null;
+              return (
+                <div className="body-group" key={group}>
+                  <h2>{group === 'locations'
+                    ? (language === 'zh' ? '太阳邻域系统' : 'Solar Neighborhood Systems')
+                    : group === 'core'
+                      ? (language === 'zh' ? '银心结构' : 'Galactic Core')
+                      : (language === 'zh' ? '旋臂与支臂' : 'Arms & Spurs')}</h2>
+                  {features.map((feature) => (
+                    <GalaxyFeatureButton
+                      key={feature.id}
+                      feature={feature}
+                      selectedId={selectedGalaxyFeature}
+                      language={language}
+                      onSelect={(id) => {
+                        setSelectedGalaxyFeature(id);
+                        setAutoFollow(true);
+                        setCameraRevision((value) => value + 1);
+                      }}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+            {visibleGalaxyFeatures.length === 0 && <p className="empty-state">{copy.noMatches}</p>}
+            <p className="galaxy-list-note">
+              {language === 'zh'
+                ? '邻域系统为代表性样本，并非完整目录；在银河全景尺度共用太阳邻域定位点。星座是从地球观察定义的天区，并非银河系内的实体区域。'
+                : 'Neighborhood systems are representative, not a complete catalog; they share one locator at Galaxy scale. Constellations are Earth-sky regions, not physical Galactic structures.'}
+            </p>
+          </>
+        ) : (
+          <>
         <div className="panel-title">
           <span>{copy.celestialBodies}</span>
           <strong>{bodies.length}</strong>
@@ -2212,9 +2756,74 @@ function App() {
         {visibleBodies.length === 0 && (
           <p className="empty-state">{copy.noMatches}</p>
         )}
+          </>
+        )}
       </aside>
 
       <aside className="right-panel glass-panel">
+        {viewMode === 'orbit' && orbitScope === 'galaxy' ? (
+          <div className="galaxy-detail-panel">
+            <div className="body-hero galaxy-hero">
+              <span
+                className={`galaxy-detail-symbol feature-${selectedGalacticStructure.group}`}
+                style={{ backgroundImage: `url(${assetUrl(`/textures/galaxy/features/${galaxyFeatureImages[selectedGalacticStructure.id].file}`)})` }}
+                aria-hidden="true"
+              />
+              <div>
+                <strong>{language === 'zh' ? selectedGalacticStructure.zh : selectedGalacticStructure.name}</strong>
+                <small>{language === 'zh' ? selectedGalacticStructure.name : selectedGalacticStructure.zh}</small>
+              </div>
+            </div>
+            <div className="selected-heading">
+              <span>{language === 'zh' ? selectedGalacticStructure.kindZh : selectedGalacticStructure.kind}</span>
+              <h2>{language === 'zh' ? selectedGalacticStructure.zh : selectedGalacticStructure.name}</h2>
+              <p>{selectedGalacticDetails.summary[language === 'zh' ? 1 : 0]}</p>
+              <div className="science-status">
+                <span>{selectedGalacticStructure.group === 'locations'
+                  ? (language === 'zh' ? '银河尺度定位' : 'GALAXY-SCALE LOCATOR')
+                  : (language === 'zh' ? '银河系结构模型' : 'GALACTIC STRUCTURE MODEL')}</span>
+                <small>{selectedGalacticStructure.group === 'locations'
+                  ? (language === 'zh'
+                    ? '邻近恒星系统在银河全景比例下不可分辨，共用太阳邻域锚点；距离数据见各自资料来源。'
+                    : 'Nearby stellar systems are unresolved at Galaxy scale and share the Solar Neighborhood anchor; distances follow the cited sources.')
+                  : (language === 'zh'
+                    ? '标签锚点参考 ESA/Gaia 艺术重建图；旋臂边界与分类仍依赖模型。'
+                    : 'Label anchors reference the ESA/Gaia artist impression; arm boundaries and classifications remain model-dependent.')}</small>
+              </div>
+            </div>
+            <div className="stat-list galaxy-stat-list">
+              {(selectedGalacticDetails.facts
+                ? (language === 'zh' ? selectedGalacticDetails.facts : selectedGalacticDetails.factsEn)
+                : [
+                  [language === 'zh' ? '结构分类' : 'Classification', language === 'zh' ? selectedGalacticStructure.kindZh : selectedGalacticStructure.kind],
+                  [language === 'zh' ? '空间关系' : 'Spatial relation', selectedGalacticDetails.relation[language === 'zh' ? 1 : 0]],
+                  [language === 'zh' ? '定位依据' : 'Position basis', language === 'zh' ? 'ESA/Gaia 标注模型图中的近似锚点' : 'Approximate anchor from ESA/Gaia annotated model view'],
+                ]).map(([label, value]) => (
+                <div key={label}>
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+              ))}
+            </div>
+            <div className="detail-copy galaxy-source-note">
+              <p>{language === 'zh'
+                ? (selectedGalacticStructure.group === 'locations'
+                  ? '这是银河全景中的定位表达，不是邻近恒星系统之间的比例位置图。'
+                  : '这里显示的是银河尺度结构，不代表旋臂具有清晰硬边界，也不等同于完整三维恒星分布。')
+                : (selectedGalacticStructure.group === 'locations'
+                  ? 'This is a locator on a Galaxy-wide map, not a to-scale chart of separations between nearby stellar systems.'
+                  : 'These are Galaxy-scale structures; spiral arms have no sharp physical edges and this is not a complete 3D stellar map.')}</p>
+              <a
+                href={selectedGalacticDetails.source ?? 'https://www.esa.int/ESA_Multimedia/Images/2023/12/Top-down_view_of_the_Milky_Way_annotated'}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {language === 'zh' ? '科学资料来源' : 'Scientific source'} ↗
+              </a>
+            </div>
+          </div>
+        ) : (
+          <>
         <div className="body-hero">
           <span className={`body-preview body-texture body-${selectedBody.id}`} style={{ backgroundImage: `url(${textureForBody(selectedBody.id)})` }} />
           <div>
@@ -2226,7 +2835,9 @@ function App() {
           <span>{selectedBody.type.toUpperCase()}</span>
           <h2>{language === 'zh' ? selectedBody.zh : selectedBody.name}</h2>
           <p>
-            {copy[`${viewMode}Description`]}
+            {viewMode === 'orbit' && orbitScope === 'galaxy'
+              ? copy.galaxyDescription
+              : copy[`${viewMode}Description`]}
           </p>
           <div className={`science-status ${ephemerisInRange ? '' : 'warning'}`}>
             <span>{ephemerisInRange ? copy.inRange : copy.outRange}</span>
@@ -2291,7 +2902,9 @@ function App() {
           </div>
           <div>
             <span>{copy.observation}</span>
-            <strong>{copy[viewMode === 'orbit' ? 'orbitView' : viewMode === 'helical' ? 'spiralView' : 'followView']}</strong>
+            <strong>{viewMode === 'orbit' && orbitScope === 'galaxy'
+              ? copy.galaxyView
+              : copy[viewMode === 'orbit' ? 'orbitView' : viewMode === 'helical' ? 'spiralView' : 'followView']}</strong>
           </div>
         </div>}
 
@@ -2327,6 +2940,7 @@ function App() {
               onChange={(event) => {
                 setScaleMode(event.target.checked ? 'physical' : 'visual');
                 setViewMode('orbit');
+                setOrbitScope('solar');
                 setCameraRevision((value) => value + 1);
               }}
             />
@@ -2337,6 +2951,8 @@ function App() {
             <span>{copy.keepCentered}</span>
           </label>
         </div>
+          </>
+        )}
       </aside>
 
       <div className="view-switcher">
@@ -2349,7 +2965,67 @@ function App() {
         <button type="button" className={viewMode === 'follow' ? 'active' : ''} onClick={() => switchViewMode('follow')}>
           △ {copy.followView}
         </button>
+        {viewMode === 'orbit' && (
+          <div className="view-subviews" aria-label={copy.orbitView}>
+            <button
+              type="button"
+              className={orbitScope === 'solar' ? 'active' : ''}
+              onClick={() => {
+                setOrbitScope('solar');
+                setCameraRevision((value) => value + 1);
+              }}
+            >
+              {copy.solarSystemView}
+            </button>
+            <button
+              type="button"
+              className={orbitScope === 'galaxy' ? 'active' : ''}
+              onClick={() => {
+                setOrbitScope('galaxy');
+                setScaleMode('visual');
+                setAutoFollow(true);
+                setCameraRevision((value) => value + 1);
+              }}
+            >
+              {copy.galaxyView}
+            </button>
+          </div>
+        )}
+        {viewMode === 'helical' && (
+          <div className="view-subviews" aria-label={copy.spiralView}>
+            <button
+              type="button"
+              className={helicalView === 'front' ? 'active' : ''}
+              onClick={() => {
+                setHelicalView('front');
+                setAutoFollow(true);
+                setCameraRevision((value) => value + 1);
+              }}
+            >
+              {copy.spiralFrontView}
+            </button>
+            <button
+              type="button"
+              className={helicalView === 'rear' ? 'active' : ''}
+              onClick={() => {
+                setHelicalView('rear');
+                setAutoFollow(true);
+                setCameraRevision((value) => value + 1);
+              }}
+            >
+              {copy.spiralRearView}
+            </button>
+          </div>
+        )}
       </div>
+
+      {viewMode === 'orbit' && orbitScope === 'galaxy' && (
+        <section className="galaxy-science-panel" aria-label={copy.galaxyView}>
+          <span>{copy.reconstruction}</span>
+          <strong>{copy.sunGalacticRadius}: 8.2 kpc · 26,600 ly</strong>
+          <small>{copy.mapBoundary}</small>
+        </section>
+      )}
 
       <footer className="bottom-bar">
         <div className="timeline">

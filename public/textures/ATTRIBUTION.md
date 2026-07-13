@@ -31,3 +31,31 @@ was processed by Bjorn Jonsson.
 
 - Source: https://www.planetary.org/space-images/color-global-map-of-europa
 - Image data: NASA/JPL/PDS
+
+## ESA / Gaia / DPAC
+
+The face-on Milky Way reconstruction in `galaxy/` is a data-informed artist's
+impression based on results from ESA's Gaia mission. It is not a direct Gaia
+stellar-density map or a photograph taken from outside the Galaxy.
+
+- Source: https://www.esa.int/ESA_Multimedia/Images/2023/12/Top-down_view_of_the_Milky_Way
+- Credits: ESA/Gaia/DPAC, Stefan Payne-Wardenaar
+- License: CC BY-SA 3.0 IGO
+
+The spiral-arm, bulge, and bar thumbnails in `galaxy/features/` are crops of
+the same ESA/Gaia face-on reconstruction. They are model images, not external
+photographs of individual spiral arms.
+
+The Sagittarius A* thumbnail is the Event Horizon Telescope Collaboration's
+1.3 mm observation reconstruction released by ESO.
+
+- Source: https://www.eso.org/public/images/eso2208-eht-mwa/
+- Credit: EHT Collaboration
+- Type: Observation at 1.3 mm wavelength
+
+The nuclear star cluster thumbnail is a Hubble WFC3/IR mosaic assembled from
+observations taken between 2010 and 2014.
+
+- Source: https://science.nasa.gov/asset/hubble/milky-way-nuclear-star-cluster/
+- Credits: NASA, ESA, and the Hubble Heritage Team (STScI/AURA); T. Do,
+  A. Ghez, V. Bajaj and collaborators
