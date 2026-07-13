@@ -1101,7 +1101,9 @@ function createGaiaMilkyWaySky() {
     // after that scientifically required longitude orientation is applied.
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.38,
+    // Keep the survey at its true angular scale, but treat it as distant sky
+    // luminance so it does not visually compete with the Solar System.
+    opacity: 0.2,
     depthWrite: false,
   }));
 }
