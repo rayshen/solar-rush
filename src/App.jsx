@@ -1117,8 +1117,9 @@ function createGaiaMilkyWaySky() {
         // Compress the displayed Galactic latitude so the complete Gaia map is
         // concentrated into the original remote luminous band instead of being
         // enlarged across the whole sky. Longitude and measured dust structure
-        // remain untouched, while vertical source-pixel density increases 4.2x.
-        float surveyV = 0.5 + (vUv.y - 0.5) * 4.2;
+        // remain untouched. A 2.8x latitude compression keeps the band remote
+        // while restoring roughly 50% more visible thickness than the old 4.2x.
+        float surveyV = 0.5 + (vUv.y - 0.5) * 2.8;
         if (surveyV <= 0.0 || surveyV >= 1.0) discard;
         vec3 observed = texture2D(uSkyMap, vec2(vUv.x, surveyV), 1.15).rgb;
         vec3 signal = max(observed - vec3(0.09), vec3(0.0));
