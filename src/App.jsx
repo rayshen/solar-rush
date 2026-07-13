@@ -1094,49 +1094,15 @@ function createGaiaMilkyWaySky() {
   positions.needsUpdate = true;
   geometry.computeBoundingSphere();
 
-  return new THREE.Mesh(geometry, new THREE.ShaderMaterial({
-    uniforms: {
-      uSkyMap: { value: texture },
-    },
-    vertexShader: `
-      varying vec2 vUv;
-
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D uSkyMap;
-      varying vec2 vUv;
-
-      void main() {
-        // The default helical camera looks almost along the Galactic plane.
-        // Compress only the displayed Galactic latitude so the survey reads as
-        // a remote luminous band instead of a cloud layer surrounding the
-        // camera. Longitude, colour and the observed dust structure stay intact.
-        float surveyV = 0.5 + (vUv.y - 0.5) * 4.2;
-        if (surveyV <= 0.0 || surveyV >= 1.0) discard;
-        vec3 observed = texture2D(uSkyMap, vec2(vUv.x, surveyV), 1.15).rgb;
-        // Gaia's faint all-sky noise floor is scientifically meaningful in a
-        // survey image, but rendered across a headset-sized sky sphere it reads
-        // as nearby grey fog. Keep measured structures above that floor and let
-        // empty space return to black.
-        vec3 signal = max(observed - vec3(0.09), vec3(0.0));
-        float luminance = dot(signal, vec3(0.2126, 0.7152, 0.0722));
-        float visibility = smoothstep(0.018, 0.28, luminance);
-        vec3 distantGlow = pow(signal * 3.05, vec3(0.82));
-        gl_FragColor = vec4(distantGlow, visibility * 0.68);
-      }
-    `,
+  return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    map: texture,
     // The local texture axes map (X, Y, Z) -> Galactic (X, Z, Y), which
     // changes handedness. DoubleSide keeps the observer-facing surface visible
     // after that scientifically required longitude orientation is applied.
     side: THREE.DoubleSide,
     transparent: true,
+    opacity: 0.38,
     depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false,
   }));
 }
 
