@@ -1062,81 +1062,114 @@ function createCatalogStarField(starTexture) {
   }));
 }
 
-function createGaiaMilkyWaySky() {
-  const radius = 218;
-  const texture = loadBodyTexture(
-    assetUrl('/textures/galaxy/gaia-edr3-all-sky-equirectangular.png'),
-    { color: true },
-  );
-  texture.anisotropy = 8;
-  texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-
-  // ESA's Gaia map is a Galactic-coordinate equirectangular all-sky survey:
-  // image center is l=0°, the horizontal midline is b=0°. SphereGeometry maps
-  // that center to local +X, increasing Galactic longitude to local +Z, and
-  // Galactic north to local +Y. Transform each direction through the standard
-  // Galactic -> ICRS J2000 matrix and then into the scene's J2000 ecliptic
-  // frame. This fixes both the observed sky orientation and the 60.19° angle
-  // between the Galactic plane and the ecliptic instead of rotating by eye.
-  const geometry = new THREE.SphereGeometry(radius, 128, 64);
-  const positions = geometry.getAttribute('position');
-  const scenePosition = [];
-  for (let index = 0; index < positions.count; index += 1) {
-    const gx = positions.getX(index);
-    const gy = positions.getZ(index);
-    const gz = positions.getY(index);
+function createMilkyWayBand(starTexture) {
+  // Galactic coordinates pass through the J2000 equatorial frame into the
+  // same J2000 ecliptic scene frame used by the planetary ephemerides.
+  const galacticToScene = (longitude, latitude, radius, target) => {
+    const cosLatitude = Math.cos(latitude);
+    const gx = radius * cosLatitude * Math.cos(longitude);
+    const gy = radius * cosLatitude * Math.sin(longitude);
+    const gz = radius * Math.sin(latitude);
     const eqX = -0.0548755604 * gx + 0.4941094279 * gy - 0.8676661490 * gz;
     const eqY = -0.8734370902 * gx - 0.4448296300 * gy - 0.1980763734 * gz;
     const eqZ = -0.4838350155 * gx + 0.7469822445 * gy + 0.4559837762 * gz;
-    scenePosition.length = 0;
-    pushEquatorialToEclipticScene(eqX, eqY, eqZ, scenePosition);
-    positions.setXYZ(index, scenePosition[0], scenePosition[1], scenePosition[2]);
+    pushEquatorialToEclipticScene(eqX, eqY, eqZ, target);
+  };
+  let seed = 0x7f4a7c15;
+  const physicalCenterLongitude = THREE.MathUtils.degToRad(sagittariusAStar.galacticLongitudeDeg);
+  const physicalCenterLatitude = THREE.MathUtils.degToRad(sagittariusAStar.galacticLatitudeDeg);
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const positions = [];
+  const colors = [];
+  const glowColors = [];
+  for (let i = 0; i < 42_000; i += 1) {
+    const centerBiased = random() < 0.34;
+    const longitudeOffset = centerBiased
+      ? (random() - random()) * 0.72
+      : random() * Math.PI * 2 - Math.PI;
+    const longitude = physicalCenterLongitude + longitudeOffset;
+    const centerStrength = Math.exp(-Math.pow(longitudeOffset / 0.62, 2));
+    const bandWidth = 0.035 + centerStrength * 0.115;
+    const latitudeCenter = centerStrength * physicalCenterLatitude;
+    const latitude = latitudeCenter + (random() - random()) * bandWidth;
+    const radius = 182 + random() * 34;
+    galacticToScene(longitude, latitude, radius, positions);
+
+    const dustLaneLatitude = latitude - latitudeCenter;
+    const dustLane = 0.34 + 0.66 * (1 - Math.exp(-Math.pow(dustLaneLatitude / 0.018, 2)));
+    const cloud = 0.68
+      + 0.18 * Math.sin(longitudeOffset * 5.0 + 0.7)
+      + 0.12 * Math.sin(longitudeOffset * 17.0 - dustLaneLatitude * 90.0);
+    const brightness = Math.max(0.12, (0.52 + centerStrength * 0.68) * dustLane * cloud)
+      * (0.72 + random() * 0.34);
+    const dustProximity = Math.exp(-Math.pow(dustLaneLatitude / 0.032, 2));
+    const reddening = THREE.MathUtils.clamp(
+      dustProximity * (0.28 + centerStrength * 0.55),
+      0,
+      0.78,
+    );
+    const population = random();
+    let coreColor;
+    if (population < 0.1 * (1 - centerStrength * 0.45)) {
+      coreColor = [0.7, 0.83, 1];
+    } else if (population < 0.48 + centerStrength * 0.2) {
+      coreColor = [1, 0.79, 0.56];
+    } else {
+      coreColor = [1, 0.95, 0.84];
+    }
+    colors.push(
+      brightness * coreColor[0],
+      brightness * coreColor[1] * (1 - reddening * 0.14),
+      brightness * coreColor[2] * (1 - reddening * 0.42),
+    );
+
+    // Integrated Galactic light becomes warm tan/ochre where old stellar
+    // populations and dust reddening dominate. Keep this diffuse glow separate
+    // from the stellar cores so individual stars retain plausible colours.
+    const glowWarmth = THREE.MathUtils.clamp(
+      0.24 + centerStrength * 0.54 + dustProximity * 0.42,
+      0,
+      1,
+    );
+    glowColors.push(
+      brightness * THREE.MathUtils.lerp(0.7, 0.9, glowWarmth),
+      brightness * THREE.MathUtils.lerp(0.82, 0.58, glowWarmth),
+      brightness * THREE.MathUtils.lerp(1.0, 0.3, glowWarmth),
+    );
   }
-  positions.needsUpdate = true;
-  geometry.computeBoundingSphere();
-
-  const material = new THREE.ShaderMaterial({
-    uniforms: {
-      uSkyMap: { value: texture },
-    },
-    vertexShader: `
-      varying vec2 vUv;
-
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D uSkyMap;
-      varying vec2 vUv;
-
-      void main() {
-        // Compress the displayed Galactic latitude so the complete Gaia map is
-        // concentrated into the original remote luminous band instead of being
-        // enlarged across the whole sky. Longitude and measured dust structure
-        // remain untouched. A 2.8x latitude compression keeps the band remote
-        // while restoring roughly 50% more visible thickness than the old 4.2x.
-        float surveyV = 0.5 + (vUv.y - 0.5) * 2.8;
-        if (surveyV <= 0.0 || surveyV >= 1.0) discard;
-        vec3 observed = texture2D(uSkyMap, vec2(vUv.x, surveyV), 1.15).rgb;
-        vec3 signal = max(observed - vec3(0.09), vec3(0.0));
-        float luminance = dot(signal, vec3(0.2126, 0.7152, 0.0722));
-        float visibility = smoothstep(0.018, 0.28, luminance);
-        vec3 distantGlow = pow(signal * 3.05, vec3(0.82));
-        gl_FragColor = vec4(distantGlow, visibility * 0.68);
-      }
-    `,
-    side: THREE.DoubleSide,
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+  const glowGeometry = new THREE.BufferGeometry();
+  glowGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  glowGeometry.setAttribute('color', new THREE.Float32BufferAttribute(glowColors, 3));
+  const material = new THREE.PointsMaterial({
+    map: starTexture,
+    size: 0.52,
+    vertexColors: true,
     transparent: true,
+    opacity: 0.7,
+    depthWrite: false,
+    alphaTest: 0.02,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
+  });
+  const glowMaterial = new THREE.PointsMaterial({
+    map: starTexture,
+    size: 2.4,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.18,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
     toneMapped: false,
   });
-
-  return new THREE.Mesh(geometry, material);
+  const band = new THREE.Group();
+  band.add(new THREE.Points(glowGeometry, glowMaterial), new THREE.Points(geometry, material));
+  return band;
 }
 
 function createSunMaterial() {
@@ -1789,7 +1822,7 @@ function buildSolarScene(mount, options) {
   scene.add(galaxy);
   const catalogStars = createCatalogStarField(starTexture);
   scene.add(catalogStars);
-  const milkyWay = createGaiaMilkyWaySky();
+  const milkyWay = createMilkyWayBand(starTexture);
   scene.add(milkyWay);
   const galaxyMap = createGalaxyMap();
   scene.add(galaxyMap.group);
@@ -3389,7 +3422,7 @@ function App() {
               </>
             )}
             <div><span>{copy.scaleModel}</span><strong>{scaleMode === 'physical' ? 'Unified physical ratio' : 'Compressed visual scale'}</strong></div>
-            <div><span>{copy.catalogue}</span><strong>Gaia EDR3 all-sky + Hipparcos bright subset / J2000</strong></div>
+            <div><span>{copy.catalogue}</span><strong>Procedural Milky Way + Hipparcos bright subset / J2000</strong></div>
             <div><span>{copy.lighting}</span><strong>Geometric eclipse + ring shadows</strong></div>
           </div>
         )}

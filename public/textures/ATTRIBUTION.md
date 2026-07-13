@@ -34,15 +34,6 @@ was processed by Bjorn Jonsson.
 
 ## ESA / Gaia / DPAC
 
-The Solar System sky background in `galaxy/gaia-edr3-all-sky-equirectangular.png`
-is ESA/Gaia EDR3's equirectangular all-sky colour map. It combines the measured
-total brightness and colour of more than 1.8 billion stars. The image is used
-as an observed sky projection, not as a distance-resolved 3D Galaxy model.
-
-- Source: https://www.esa.int/ESA_Multimedia/Images/2020/12/The_colour_of_the_sky_from_Gaia_s_Early_Data_Release_32
-- Credits: ESA/Gaia/DPAC; acknowledgement: A. Moitinho
-- License: CC BY-SA 3.0 IGO
-
 The face-on Milky Way reconstruction in `galaxy/` is a data-informed artist's
 impression based on results from ESA's Gaia mission. It is not a direct Gaia
 stellar-density map or a photograph taken from outside the Galaxy.
