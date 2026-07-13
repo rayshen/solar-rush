@@ -1062,62 +1062,49 @@ function createCatalogStarField(starTexture) {
   }));
 }
 
-function createPhotographicMilkyWayBackdrop() {
+function createGaiaMilkyWaySky() {
+  const radius = 218;
   const texture = loadBodyTexture(
-    assetUrl('/textures/galaxy/milky-way-photographic-v2.png'),
+    assetUrl('/textures/galaxy/gaia-edr3-all-sky-equirectangular.png'),
     { color: true },
   );
   texture.anisotropy = 8;
   texture.minFilter = THREE.LinearMipmapLinearFilter;
-  texture.wrapS = THREE.ClampToEdgeWrapping;
+  texture.wrapS = THREE.RepeatWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
 
-  // This plane is fixed far beyond the solar system instead of being attached
-  // to the camera. Normal depth testing keeps every scene object in front,
-  // while the large distance makes camera movement produce only subtle parallax.
-  const material = new THREE.ShaderMaterial({
-    uniforms: {
-      uMilkyWayMap: { value: texture },
-      uOpacity: { value: 0.82 },
-    },
-    vertexShader: `
-      varying vec2 vUv;
+  // ESA's Gaia map is a Galactic-coordinate equirectangular all-sky survey:
+  // image center is l=0°, the horizontal midline is b=0°. SphereGeometry maps
+  // that center to local +X, increasing Galactic longitude to local +Z, and
+  // Galactic north to local +Y. Transform each direction through the standard
+  // Galactic -> ICRS J2000 matrix and then into the scene's J2000 ecliptic
+  // frame. This fixes both the observed sky orientation and the 60.19° angle
+  // between the Galactic plane and the ecliptic instead of rotating by eye.
+  const geometry = new THREE.SphereGeometry(radius, 128, 64);
+  const positions = geometry.getAttribute('position');
+  const scenePosition = [];
+  for (let index = 0; index < positions.count; index += 1) {
+    const gx = positions.getX(index);
+    const gy = positions.getZ(index);
+    const gz = positions.getY(index);
+    const eqX = -0.0548755604 * gx + 0.4941094279 * gy - 0.8676661490 * gz;
+    const eqY = -0.8734370902 * gx - 0.4448296300 * gy - 0.1980763734 * gz;
+    const eqZ = -0.4838350155 * gx + 0.7469822445 * gy + 0.4559837762 * gz;
+    scenePosition.length = 0;
+    pushEquatorialToEclipticScene(eqX, eqY, eqZ, scenePosition);
+    positions.setXYZ(index, scenePosition[0], scenePosition[1], scenePosition[2]);
+  }
+  positions.needsUpdate = true;
+  geometry.computeBoundingSphere();
 
-      void main() {
-        vUv = uv;
-        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-      }
-    `,
-    fragmentShader: `
-      uniform sampler2D uMilkyWayMap;
-      uniform float uOpacity;
-      varying vec2 vUv;
-
-      void main() {
-        vec4 sampleColor = texture2D(uMilkyWayMap, vUv);
-        float edgeFade = smoothstep(0.0, 0.08, vUv.x)
-          * smoothstep(0.0, 0.08, 1.0 - vUv.x)
-          * smoothstep(0.0, 0.14, vUv.y)
-          * smoothstep(0.0, 0.14, 1.0 - vUv.y);
-        vec3 liftedColor = pow(sampleColor.rgb, vec3(0.72)) * 0.82;
-        gl_FragColor = vec4(liftedColor, edgeFade * uOpacity);
-      }
-    `,
+  return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    map: texture,
     side: THREE.DoubleSide,
     transparent: true,
+    opacity: 0.62,
     depthWrite: false,
-    depthTest: true,
-    blending: THREE.AdditiveBlending,
     toneMapped: false,
-  });
-
-  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(2200, 1100), material);
-  backdrop.position.set(0, -1030, -1420);
-  backdrop.rotation.x = THREE.MathUtils.degToRad(-48);
-  backdrop.rotation.z = THREE.MathUtils.degToRad(-2.2);
-  backdrop.frustumCulled = false;
-  backdrop.renderOrder = -100;
-  return backdrop;
+  }));
 }
 
 function createSunMaterial() {
@@ -1770,7 +1757,7 @@ function buildSolarScene(mount, options) {
   scene.add(galaxy);
   const catalogStars = createCatalogStarField(starTexture);
   scene.add(catalogStars);
-  const milkyWay = createPhotographicMilkyWayBackdrop();
+  const milkyWay = createGaiaMilkyWaySky();
   scene.add(milkyWay);
   const galaxyMap = createGalaxyMap();
   scene.add(galaxyMap.group);
@@ -2436,6 +2423,7 @@ function buildSolarScene(mount, options) {
     galaxy.userData.depthDrift.value = rushingMode ? -forward * 2.4 : 0;
     galaxy.position.copy(camera.position);
     catalogStars.position.copy(camera.position);
+    milkyWay.position.copy(camera.position);
     cameraLight.position.copy(camera.position);
     renderer.render(scene, camera);
 
