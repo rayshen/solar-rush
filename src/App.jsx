@@ -1086,24 +1086,56 @@ function createMilkyWayBand(starTexture) {
   const colors = [];
   const glowColors = [];
   for (let i = 0; i < 42_000; i += 1) {
-    const centerBiased = random() < 0.34;
+    const centerBiased = random() < 0.4;
     const longitudeOffset = centerBiased
-      ? (random() - random()) * 0.72
+      ? (random() - random()) * 0.82
       : random() * Math.PI * 2 - Math.PI;
     const longitude = physicalCenterLongitude + longitudeOffset;
-    const centerStrength = Math.exp(-Math.pow(longitudeOffset / 0.62, 2));
-    const bandWidth = 0.035 + centerStrength * 0.115;
-    const latitudeCenter = centerStrength * physicalCenterLatitude;
+    const centerStrength = Math.exp(-Math.pow(longitudeOffset / 0.68, 2));
+    const innerBulge = Math.exp(-Math.pow(longitudeOffset / 0.27, 2));
+    const bandWidth = 0.035 + centerStrength * 0.135;
+    const latitudeCenter = centerStrength * physicalCenterLatitude
+      + centerStrength * 0.006 * Math.sin(longitudeOffset * 5.5 + 0.4);
     const latitude = latitudeCenter + (random() - random()) * bandWidth;
     const radius = 182 + random() * 34;
     galacticToScene(longitude, latitude, radius, positions);
 
-    const dustLaneLatitude = latitude - latitudeCenter;
-    const dustLane = 0.34 + 0.66 * (1 - Math.exp(-Math.pow(dustLaneLatitude / 0.018, 2)));
-    const cloud = 0.68
-      + 0.18 * Math.sin(longitudeOffset * 5.0 + 0.7)
-      + 0.12 * Math.sin(longitudeOffset * 17.0 - dustLaneLatitude * 90.0);
-    const brightness = Math.max(0.12, (0.52 + centerStrength * 0.68) * dustLane * cloud)
+    // From Earth the nuclear star cluster itself is hidden at visible
+    // wavelengths. The bright feature is the much broader Sagittarius bulge,
+    // crossed by an irregular, slightly warped foreground dust lane.
+    const dustLaneCenter = latitudeCenter
+      + 0.005 * Math.sin(longitudeOffset * 6.5 - 0.8)
+      + 0.003 * Math.sin(longitudeOffset * 17.0 + 1.7);
+    const dustLaneLatitude = latitude - dustLaneCenter;
+    const dustLaneWidth = 0.013 + centerStrength * 0.009;
+    const dustLane = 0.18
+      + 0.82 * (1 - Math.exp(-Math.pow(dustLaneLatitude / dustLaneWidth, 2)));
+    const pipeCloud = Math.exp(
+      -Math.pow((longitudeOffset + 0.29) / 0.16, 2)
+      -Math.pow((dustLaneLatitude + 0.018) / 0.035, 2),
+    );
+    const centralCloud = Math.exp(
+      -Math.pow((longitudeOffset - 0.07) / 0.11, 2)
+      -Math.pow((dustLaneLatitude - 0.006) / 0.027, 2),
+    );
+    const patchyExtinction = 1 - 0.5 * Math.max(pipeCloud, centralCloud);
+    const stellarCloud = THREE.MathUtils.clamp(
+      0.76
+        + 0.16 * Math.sin(longitudeOffset * 5.0 + 0.7)
+        + 0.11 * Math.sin(longitudeOffset * 17.0 - dustLaneLatitude * 90.0),
+      0.42,
+      1.02,
+    );
+    const nuclearObscuration = innerBulge
+      * Math.exp(-Math.pow(dustLaneLatitude / 0.032, 2));
+    const brightness = Math.max(
+      0.1,
+      (0.5 + centerStrength * 0.63 + innerBulge * 0.12)
+        * dustLane
+        * patchyExtinction
+        * stellarCloud
+        * (1 - nuclearObscuration * 0.34),
+    )
       * (0.72 + random() * 0.34);
     const dustProximity = Math.exp(-Math.pow(dustLaneLatitude / 0.032, 2));
     const reddening = THREE.MathUtils.clamp(
@@ -1130,14 +1162,15 @@ function createMilkyWayBand(starTexture) {
     // populations and dust reddening dominate. Keep this diffuse glow separate
     // from the stellar cores so individual stars retain plausible colours.
     const glowWarmth = THREE.MathUtils.clamp(
-      0.24 + centerStrength * 0.54 + dustProximity * 0.42,
+      0.22 + centerStrength * 0.58 + dustProximity * 0.46,
       0,
       1,
     );
+    const integratedLight = brightness * (0.78 + centerStrength * 0.68);
     glowColors.push(
-      brightness * THREE.MathUtils.lerp(0.7, 0.9, glowWarmth),
-      brightness * THREE.MathUtils.lerp(0.82, 0.58, glowWarmth),
-      brightness * THREE.MathUtils.lerp(1.0, 0.3, glowWarmth),
+      integratedLight * THREE.MathUtils.lerp(0.7, 0.9, glowWarmth),
+      integratedLight * THREE.MathUtils.lerp(0.82, 0.58, glowWarmth),
+      integratedLight * THREE.MathUtils.lerp(1.0, 0.3, glowWarmth),
     );
   }
   const geometry = new THREE.BufferGeometry();
