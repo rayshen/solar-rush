@@ -1097,14 +1097,47 @@ function createGaiaMilkyWaySky() {
   positions.needsUpdate = true;
   geometry.computeBoundingSphere();
 
-  return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-    map: texture,
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      uGaiaMap: { value: texture },
+      uIntensity: { value: 0.68 },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D uGaiaMap;
+      uniform float uIntensity;
+      varying vec2 vUv;
+
+      void main() {
+        vec3 surveyColor = texture2D(uGaiaMap, vUv).rgb;
+        float luminance = dot(surveyColor, vec3(0.2126, 0.7152, 0.0722));
+
+        // Gaia's published survey image lifts faint all-sky flux so catalogue
+        // structure remains visible. Remove that display floor before using it
+        // as a night-sky background; otherwise the complete sphere becomes a
+        // grey photographic plate instead of dark space with a Milky Way band.
+        float visibility = smoothstep(0.055, 0.24, luminance);
+        vec3 nightSkyColor = max(surveyColor - vec3(0.035), vec3(0.0));
+        nightSkyColor = pow(nightSkyColor, vec3(0.82)) * uIntensity;
+
+        gl_FragColor = vec4(nightSkyColor, visibility * 0.72);
+      }
+    `,
     side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.62,
     depthWrite: false,
+    blending: THREE.AdditiveBlending,
     toneMapped: false,
-  }));
+  });
+
+  return new THREE.Mesh(geometry, material);
 }
 
 function createSunMaterial() {
