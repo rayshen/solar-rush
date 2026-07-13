@@ -2110,7 +2110,6 @@ function buildSolarScene(mount, options) {
     helicalTrailGroup.visible = !galaxyView;
     sunMotionLine.group.visible = !galaxyView && sunMotionLine.group.visible;
     galaxyMap.group.visible = galaxyView;
-    if (galaxyView) galaxyMap.group.rotation.y += delta * 0.018;
     const selectedMapFeature = galaxyFeatures.find((feature) => feature.id === state.selectedGalaxyFeature);
     const [selectionX, selectionZ] = selectedMapFeature?.map ?? [0, 0];
     const selectionAtGalacticCenter = selectionX === 0 && selectionZ === 0;
@@ -2161,8 +2160,8 @@ function buildSolarScene(mount, options) {
     sunLight.position.copy(worldPositions.get('sun'));
     const selected = bodyNodes.get(state.selectedId) ?? bodyNodes.get('sun');
     selected.group.getWorldPosition(targetPosition);
-    if (galaxyView) galaxyMap.selectionMarker.getWorldPosition(cameraFocusPosition);
-    else cameraFocusPosition.copy(state.viewMode === 'orbit' ? worldPositions.get('sun') : targetPosition);
+    if (galaxyView) galaxyMap.group.getWorldPosition(cameraFocusPosition);
+    else cameraFocusPosition.copy(targetPosition);
 
     const selectedBody = selected.body;
     const selectedSceneRadius = state.scaleMode === 'physical'
@@ -2181,7 +2180,9 @@ function buildSolarScene(mount, options) {
         ? PHYSICAL_ORBIT_CAMERA_BIAS
         : selectedBody.type === 'star'
           ? new THREE.Vector3(0, 42, 38)
-        : new THREE.Vector3(distance * 1.25, distance * 0.72, distance * 1.35);
+          : selectedBody.type === 'planet'
+            ? new THREE.Vector3(8, 5.2, 9.5)
+            : new THREE.Vector3(3.8, 2.4, 4.6);
     } else if (state.viewMode === 'helical') {
       const viewDirection = state.helicalView === 'rear' ? -1 : 1;
       cameraBias = selectedBody.type === 'star'
@@ -2539,8 +2540,6 @@ function App() {
       },
       onSelectGalaxyFeature: (id) => {
         setSelectedGalaxyFeature(id);
-        setAutoFollow(true);
-        setCameraRevision((value) => value + 1);
       },
       onTick: (nextTelemetry) => {
         const now = performance.now();
@@ -2682,8 +2681,6 @@ function App() {
                       language={language}
                       onSelect={(id) => {
                         setSelectedGalaxyFeature(id);
-                        setAutoFollow(true);
-                        setCameraRevision((value) => value + 1);
                       }}
                     />
                   ))}
