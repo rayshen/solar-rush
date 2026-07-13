@@ -253,10 +253,10 @@ p {
 }
 
 .share-menu {
-  position: absolute;
-  top: calc(100% + 9px);
-  right: 0;
-  z-index: 6;
+  position: fixed;
+  top: 70px;
+  right: 92px;
+  z-index: 50;
   width: 286px;
   padding: 6px;
   border: 1px solid rgba(125, 190, 239, 0.28);
@@ -267,7 +267,11 @@ p {
   backdrop-filter: blur(18px) saturate(125%);
 }
 
-.controls .share-menu button {
+.share-backdrop {
+  display: none;
+}
+
+.share-menu button {
   display: grid;
   width: 100%;
   height: auto;
@@ -281,8 +285,8 @@ p {
   text-align: left;
 }
 
-.controls .share-menu button:hover,
-.controls .share-menu button:focus-visible {
+.share-menu button:hover,
+.share-menu button:focus-visible {
   background: rgba(72, 146, 190, 0.18);
 }
 
@@ -1250,6 +1254,29 @@ kbd {
     height: auto;
     gap: 14px;
     padding: 16px;
+  }
+
+  .top-bar.share-menu-open {
+    z-index: 20;
+  }
+
+  .share-backdrop {
+    position: fixed;
+    z-index: 98;
+    inset: 0;
+    display: block;
+    background: rgba(0, 4, 10, 0.62);
+    backdrop-filter: blur(4px);
+  }
+
+  .share-menu {
+    position: fixed;
+    z-index: 99;
+    top: 50%;
+    right: auto;
+    left: 50%;
+    width: min(320px, calc(100vw - 32px));
+    transform: translate(-50%, -50%);
   }
 
   .controls {

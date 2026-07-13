@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import {
@@ -2595,6 +2596,7 @@ function App() {
   const stateRef = useRef(null);
   const sceneRef = useRef(null);
   const shareMenuRef = useRef(null);
+  const shareMenuPanelRef = useRef(null);
   const initialShareRoute = useRef(null);
   if (!initialShareRoute.current) initialShareRoute.current = readShareRoute();
   const [selectedId, setSelectedId] = useState(initialShareRoute.current.selectedId);
@@ -2762,7 +2764,8 @@ function App() {
     if (!shareMenuOpen) return undefined;
     const closeShareMenu = (event) => {
       if (event.type === 'keydown' && event.key !== 'Escape') return;
-      if (event.type === 'pointerdown' && shareMenuRef.current?.contains(event.target)) return;
+      if (event.type === 'pointerdown'
+        && (shareMenuRef.current?.contains(event.target) || shareMenuPanelRef.current?.contains(event.target))) return;
       setShareMenuOpen(false);
     };
     document.addEventListener('pointerdown', closeShareMenu);
@@ -2879,7 +2882,7 @@ function App() {
     <main className={`app-shell ${mobileMenuOpen ? 'mobile-menu-open' : ''} ${viewMode === 'orbit' && orbitScope === 'galaxy' ? 'galaxy-view' : ''}`}>
       <section ref={mountRef} className="space-stage" aria-label={language === 'zh' ? '3D 太阳系模拟器' : '3D Solar System Simulator'} />
 
-      <header className="top-bar">
+      <header className={`top-bar ${shareMenuOpen ? 'share-menu-open' : ''}`}>
         <div className="brand-block">
           <span className="brand-mark" aria-hidden="true" />
           <h1>Solar Rush</h1>
@@ -2947,17 +2950,21 @@ function App() {
             >
               <ShareIcon />{copy.share}
             </button>
-            {shareMenuOpen && (
-              <div className="share-menu" role="menu" aria-label={copy.share}>
-                <button type="button" role="menuitem" onClick={() => copyShareLink(false)}>
-                  <span className="share-option-icon"><CopyIcon /></span>
-                  <span><strong>{copy.copySite}</strong><small>{copy.copySiteHint}</small></span>
-                </button>
-                <button type="button" role="menuitem" onClick={() => copyShareLink(true)}>
-                  <span className="share-option-icon"><ShareIcon /></span>
-                  <span><strong>{copy.copyView}</strong><small>{copy.copyViewHint}</small></span>
-                </button>
-              </div>
+            {shareMenuOpen && createPortal(
+              <>
+                <div className="share-backdrop" aria-hidden="true" onClick={() => setShareMenuOpen(false)} />
+                <div className="share-menu" ref={shareMenuPanelRef} role="menu" aria-label={copy.share}>
+                  <button type="button" role="menuitem" onClick={() => copyShareLink(false)}>
+                    <span className="share-option-icon"><CopyIcon /></span>
+                    <span><strong>{copy.copySite}</strong><small>{copy.copySiteHint}</small></span>
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => copyShareLink(true)}>
+                    <span className="share-option-icon"><ShareIcon /></span>
+                    <span><strong>{copy.copyView}</strong><small>{copy.copyViewHint}</small></span>
+                  </button>
+                </div>
+              </>,
+              document.body,
             )}
             {shareNotice && <span className="share-notice" role="status">{shareNotice}</span>}
           </div>
