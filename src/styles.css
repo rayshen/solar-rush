@@ -77,6 +77,7 @@ button {
 
 .top-bar {
   position: absolute;
+  z-index: 10;
   top: 0;
   left: 0;
   right: 0;
@@ -230,16 +231,14 @@ p {
 
 .share-controls {
   position: relative;
-  display: flex;
-  gap: 6px;
 }
 
-.controls .share-controls button {
+.controls .share-controls > button {
   display: inline-flex;
   min-width: 0;
   align-items: center;
   gap: 6px;
-  padding: 0 9px;
+  padding: 0 12px;
   white-space: nowrap;
 }
 
@@ -251,6 +250,75 @@ p {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.7;
+}
+
+.share-menu {
+  position: absolute;
+  top: calc(100% + 9px);
+  right: 0;
+  z-index: 6;
+  width: 286px;
+  padding: 6px;
+  border: 1px solid rgba(125, 190, 239, 0.28);
+  border-radius: 12px;
+  background:
+    linear-gradient(145deg, rgba(12, 25, 43, 0.98), rgba(4, 10, 19, 0.98));
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.46), inset 0 1px rgba(255, 255, 255, 0.04);
+  backdrop-filter: blur(18px) saturate(125%);
+}
+
+.controls .share-menu button {
+  display: grid;
+  width: 100%;
+  height: auto;
+  min-height: 62px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.controls .share-menu button:hover,
+.controls .share-menu button:focus-visible {
+  background: rgba(72, 146, 190, 0.18);
+}
+
+.share-option-icon {
+  display: grid !important;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 1px solid rgba(125, 248, 255, 0.22);
+  border-radius: 9px;
+  background: rgba(40, 109, 145, 0.18);
+  color: #a8f5ff !important;
+}
+
+.share-option-icon .copy-icon {
+  width: 17px;
+  height: 17px;
+}
+
+.share-menu strong,
+.share-menu small {
+  display: block;
+}
+
+.share-menu strong {
+  color: #f2f8ff;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.share-menu small {
+  margin-top: 4px;
+  color: #8299b9;
+  font-size: 11px;
+  line-height: 1.35;
+  white-space: normal;
 }
 
 .share-notice {

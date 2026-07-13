@@ -20,6 +20,9 @@ const BACKGROUND_TRAVEL_Z = -SYSTEM_TRAVEL_Z;
 const START_DATE = new Date();
 const PHYSICAL_KM_PER_UNIT = 50_000_000;
 const PHYSICAL_ORBIT_CAMERA_BIAS = new THREE.Vector3(0, 135, 125);
+const GALAXY_MAP_SIZE = 250;
+const GALAXY_MOBILE_FILL = 0.85;
+const MOBILE_LAYOUT_MAX_WIDTH = 1240;
 const EQJ_TO_ECL = Rotation_EQJ_ECL();
 const assetUrl = (path) => `${import.meta.env.BASE_URL}${path.replace(/^\//, '')}`;
 const simulationSpeeds = [
@@ -70,7 +73,9 @@ const ui = {
     mapBoundary: 'Data-informed artist impression, not an external photograph or direct density map',
     drift: 'Forward drift', wheel: 'Wheel', zoom: 'Zoom', leftClick: 'Left drag', rotate: 'Rotate',
     rightClick: 'Right drag', pan: 'Pan', select: 'Select', focusBody: 'Focus body',
-    copySite: 'Copy site', copyView: 'Copy current view', copied: 'Link copied', copyFailed: 'Copy failed',
+    share: 'Share', copySite: 'Site link', copyView: 'Current view',
+    copySiteHint: 'Open Solar Rush from its default view', copyViewHint: 'Keep this body, speed and camera angle',
+    copied: 'Link copied', copyFailed: 'Copy failed',
     inRange: 'EPHEMERIS IN RANGE', outRange: 'EPHEMERIS OUT OF RANGE',
     physicalScale: 'Unified scale: 1 scene unit = 50 million km.', visualScale: 'Visual scale: sizes and distances are compressed separately.',
     orbitDescription: 'Top-down system view for comparing positions and orbital scale.',
@@ -95,7 +100,9 @@ const ui = {
     mapBoundary: '基于数据的艺术重建图，并非系外实拍或直接恒星密度图',
     drift: '前进距离', wheel: '滚轮', zoom: '缩放', leftClick: '左键拖动', rotate: '旋转',
     rightClick: '右键拖动', pan: '平移', select: '选择', focusBody: '聚焦天体',
-    copySite: '复制站点', copyView: '复制当前视角', copied: '链接已复制', copyFailed: '复制失败',
+    share: '分享', copySite: '站点链接', copyView: '当前视角',
+    copySiteHint: '从默认视角打开 Solar Rush', copyViewHint: '保留当前天体、速度与相机角度',
+    copied: '链接已复制', copyFailed: '复制失败',
     inRange: '星历有效范围内', outRange: '超出星历有效范围',
     physicalScale: '统一比例：1 场景单位 = 5000 万 km。', visualScale: '视觉比例：尺寸与距离分别压缩。',
     orbitDescription: '俯视完整轨道结构，适合比较行星位置与系统尺度。',
@@ -709,7 +716,7 @@ function createGalaxyMap() {
   const galaxyTexture = loadBodyTexture(assetUrl('/textures/galaxy/gaia-milky-way-face-on.jpg'), { color: true });
   galaxyTexture.anisotropy = 8;
   const galaxyDisk = new THREE.Mesh(
-    new THREE.PlaneGeometry(250, 250),
+    new THREE.PlaneGeometry(GALAXY_MAP_SIZE, GALAXY_MAP_SIZE),
     new THREE.MeshBasicMaterial({
       map: galaxyTexture,
       transparent: true,
@@ -1610,11 +1617,21 @@ function createPlanetMaterial(body) {
   });
 }
 
+function getGalaxyCameraBias(camera, viewportWidth) {
+  if (viewportWidth > MOBILE_LAYOUT_MAX_WIDTH) return new THREE.Vector3(0, 94, 18);
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
+  const limitingFov = Math.min(verticalFov, horizontalFov);
+  const halfMapSize = GALAXY_MAP_SIZE / 2;
+  const cameraDistance = halfMapSize / (Math.tan(limitingFov / 2) * GALAXY_MOBILE_FILL);
+  return new THREE.Vector3(0, 1, 18 / 94).normalize().multiplyScalar(cameraDistance);
+}
+
 function buildSolarScene(mount, options) {
   const scene = new THREE.Scene();
   scene.background = new THREE.Color('#03060d');
 
-  const camera = new THREE.PerspectiveCamera(54, mount.clientWidth / mount.clientHeight, 0.05, 800);
+  const camera = new THREE.PerspectiveCamera(54, mount.clientWidth / mount.clientHeight, 0.05, 2400);
   if (options.getState().viewMode === 'helical') {
     camera.position.set(...(options.getState().helicalView === 'rear' ? [32, 22, -70] : [-20, 14, 43]));
   }
@@ -1897,6 +1914,8 @@ function buildSolarScene(mount, options) {
   let lastOrbitScope = '';
   let lastHelicalView = '';
   let lastCameraRevision = -1;
+  let viewportRevision = 0;
+  let lastViewportRevision = -1;
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
   const pointerStart = new THREE.Vector2();
@@ -2183,7 +2202,7 @@ function buildSolarScene(mount, options) {
         : 4.2;
     let cameraBias;
     if (galaxyView) {
-      cameraBias = new THREE.Vector3(0, 94, 18);
+      cameraBias = getGalaxyCameraBias(camera, mount.clientWidth);
     } else if (state.viewMode === 'orbit') {
       cameraBias = state.scaleMode === 'physical'
         ? PHYSICAL_ORBIT_CAMERA_BIAS
@@ -2208,8 +2227,8 @@ function buildSolarScene(mount, options) {
         ? new THREE.Vector3(-8, 6.5, 15)
         : new THREE.Vector3(selectedSceneRadius * 7 + 7, selectedSceneRadius * 2.2 + 2.4, selectedSceneRadius * 4.4 + 7);
     }
-    controls.minDistance = galaxyView ? 72 : selectedSceneRadius * (selectedBody.type === 'star' ? 1.68 : 1.18);
-    controls.maxDistance = galaxyView ? 310 : 240;
+    controls.minDistance = galaxyView ? cameraBias.length() * 0.56 : selectedSceneRadius * (selectedBody.type === 'star' ? 1.68 : 1.18);
+    controls.maxDistance = galaxyView ? Math.max(310, cameraBias.length() * 1.8) : 240;
     controls.minPolarAngle = galaxyView ? 0.08 : 0;
     controls.maxPolarAngle = galaxyView ? 0.52 : Math.PI;
     if (state.viewMode === 'follow' && selectedBody.type !== 'star') {
@@ -2239,7 +2258,8 @@ function buildSolarScene(mount, options) {
       || state.viewMode !== lastViewMode
       || state.orbitScope !== lastOrbitScope
       || state.helicalView !== lastHelicalView
-      || state.cameraRevision !== lastCameraRevision;
+      || state.cameraRevision !== lastCameraRevision
+      || viewportRevision !== lastViewportRevision;
     if (cameraTargetChanged) {
       if (state.cameraPose) {
         camera.position.fromArray(state.cameraPose.position);
@@ -2256,6 +2276,7 @@ function buildSolarScene(mount, options) {
       lastOrbitScope = state.orbitScope;
       lastHelicalView = state.helicalView;
       lastCameraRevision = state.cameraRevision;
+      lastViewportRevision = viewportRevision;
       previousTarget.copy(cameraFocusPosition);
     }
 
@@ -2330,6 +2351,7 @@ function buildSolarScene(mount, options) {
     camera.aspect = clientWidth / clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(clientWidth, clientHeight);
+    viewportRevision += 1;
   };
   window.addEventListener('resize', resize);
   animate();
@@ -2421,6 +2443,17 @@ function CopyIcon() {
     <svg className="copy-icon" viewBox="0 0 24 24" aria-hidden="true">
       <rect x="8" y="8" width="11" height="11" rx="2" />
       <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </svg>
+  );
+}
+
+function ShareIcon() {
+  return (
+    <svg className="copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="18" cy="5" r="2.4" />
+      <circle cx="6" cy="12" r="2.4" />
+      <circle cx="18" cy="19" r="2.4" />
+      <path d="m8.2 10.9 7.6-4.7M8.2 13.1l7.6 4.7" />
     </svg>
   );
 }
@@ -2559,6 +2592,7 @@ function App() {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
   const sceneRef = useRef(null);
+  const shareMenuRef = useRef(null);
   const initialShareRoute = useRef(null);
   if (!initialShareRoute.current) initialShareRoute.current = readShareRoute();
   const [selectedId, setSelectedId] = useState(initialShareRoute.current.selectedId);
@@ -2578,6 +2612,7 @@ function App() {
   const [cameraRevision, setCameraRevision] = useState(0);
   const [cameraPose, setCameraPose] = useState(initialShareRoute.current.cameraPose);
   const [shareNotice, setShareNotice] = useState('');
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [telemetry, setTelemetry] = useState({
     simDays: 0,
     elapsedSeconds: 0,
@@ -2660,6 +2695,7 @@ function App() {
   const copyShareLink = async (includeCurrentView) => {
     const hash = includeCurrentView ? createCurrentViewHash(shareState, sceneRef.current?.getCameraPose()) : '';
     const url = new URL(`${window.location.pathname}${hash}`, window.location.origin).href;
+    setShareMenuOpen(false);
     try {
       await copyToClipboard(url);
       setShareNotice(copy.copied);
@@ -2719,6 +2755,21 @@ function App() {
     cameraRevision,
     cameraPose,
   };
+
+  useEffect(() => {
+    if (!shareMenuOpen) return undefined;
+    const closeShareMenu = (event) => {
+      if (event.type === 'keydown' && event.key !== 'Escape') return;
+      if (event.type === 'pointerdown' && shareMenuRef.current?.contains(event.target)) return;
+      setShareMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', closeShareMenu);
+    document.addEventListener('keydown', closeShareMenu);
+    return () => {
+      document.removeEventListener('pointerdown', closeShareMenu);
+      document.removeEventListener('keydown', closeShareMenu);
+    };
+  }, [shareMenuOpen]);
 
   useEffect(() => {
     let lastAppliedHash = null;
@@ -2884,9 +2935,28 @@ function App() {
               ))}
             </select>
           </label>
-          <div className="share-controls" aria-label={language === 'zh' ? '分享' : 'Share'}>
-            <button type="button" onClick={() => copyShareLink(false)}><CopyIcon />{copy.copySite}</button>
-            <button type="button" onClick={() => copyShareLink(true)}><CopyIcon />{copy.copyView}</button>
+          <div className="share-controls" ref={shareMenuRef}>
+            <button
+              type="button"
+              className={shareMenuOpen ? 'active' : ''}
+              aria-haspopup="menu"
+              aria-expanded={shareMenuOpen}
+              onClick={() => setShareMenuOpen((value) => !value)}
+            >
+              <ShareIcon />{copy.share}
+            </button>
+            {shareMenuOpen && (
+              <div className="share-menu" role="menu" aria-label={copy.share}>
+                <button type="button" role="menuitem" onClick={() => copyShareLink(false)}>
+                  <span className="share-option-icon"><CopyIcon /></span>
+                  <span><strong>{copy.copySite}</strong><small>{copy.copySiteHint}</small></span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => copyShareLink(true)}>
+                  <span className="share-option-icon"><ShareIcon /></span>
+                  <span><strong>{copy.copyView}</strong><small>{copy.copyViewHint}</small></span>
+                </button>
+              </div>
+            )}
             {shareNotice && <span className="share-notice" role="status">{shareNotice}</span>}
           </div>
           <div className="language-switcher" aria-label="Language">
