@@ -1062,84 +1062,48 @@ function createCatalogStarField(starTexture) {
   }));
 }
 
-function createMilkyWayBand(starTexture) {
-  // Galactic coordinates pass through the J2000 equatorial frame into the
-  // same J2000 ecliptic scene frame used by the planetary ephemerides.
-  const galacticToScene = (longitude, latitude, radius, target) => {
-    const cosLatitude = Math.cos(latitude);
-    const gx = radius * cosLatitude * Math.cos(longitude);
-    const gy = radius * cosLatitude * Math.sin(longitude);
-    const gz = radius * Math.sin(latitude);
+function createGaiaMilkyWaySky() {
+  const radius = 218;
+  const texture = loadBodyTexture(
+    assetUrl('/textures/galaxy/gaia-edr3-all-sky-equirectangular.png'),
+    { color: true },
+  );
+  texture.anisotropy = 8;
+  texture.wrapS = THREE.RepeatWrapping;
+
+  // ESA's equirectangular Gaia map is centered on Galactic longitude l=0°.
+  // SphereGeometry maps its image center to local +X, image-left to local +Z,
+  // and image-top to local +Y. Treat those axes as Galactic +X, +Y, +Z,
+  // then transform every vertex through ICRS J2000 into the scene's J2000
+  // ecliptic frame. This keeps the observed sky aligned with the planets and
+  // the separate Hipparcos bright-star layer instead of rotating it by eye.
+  const geometry = new THREE.SphereGeometry(radius, 128, 64);
+  const positions = geometry.getAttribute('position');
+  const scenePosition = [];
+  for (let index = 0; index < positions.count; index += 1) {
+    const gx = positions.getX(index);
+    const gy = positions.getZ(index);
+    const gz = positions.getY(index);
     const eqX = -0.0548755604 * gx + 0.4941094279 * gy - 0.8676661490 * gz;
     const eqY = -0.8734370902 * gx - 0.4448296300 * gy - 0.1980763734 * gz;
     const eqZ = -0.4838350155 * gx + 0.7469822445 * gy + 0.4559837762 * gz;
-    pushEquatorialToEclipticScene(eqX, eqY, eqZ, target);
-  };
-  let seed = 0x7f4a7c15;
-  const physicalCenterLongitude = THREE.MathUtils.degToRad(sagittariusAStar.galacticLongitudeDeg);
-  const physicalCenterLatitude = THREE.MathUtils.degToRad(sagittariusAStar.galacticLatitudeDeg);
-  const random = () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
-  const positions = [];
-  const colors = [];
-  for (let i = 0; i < 42_000; i += 1) {
-    // Concentrate stars toward the Galactic center while retaining the full band.
-    const centerBiased = random() < 0.34;
-    const longitudeOffset = centerBiased
-      ? (random() - random()) * 0.72
-      : random() * Math.PI * 2 - Math.PI;
-    const longitude = physicalCenterLongitude + longitudeOffset;
-    const centerStrength = Math.exp(-Math.pow(longitudeOffset / 0.62, 2));
-    const bandWidth = 0.035 + centerStrength * 0.115;
-    // The conventional Galactic plane remains b=0°. Only the central density
-    // peak approaches the observed Sgr A* latitude; this keeps the coordinate
-    // plane distinct from the physical dynamical-center anchor.
-    const latitudeCenter = centerStrength * physicalCenterLatitude;
-    const latitude = latitudeCenter + (random() - random()) * bandWidth;
-    const radius = 182 + random() * 34;
-    galacticToScene(longitude, latitude, radius, positions);
-
-    // A dim mid-plane creates the split dust lane; longitudinal modulation
-    // breaks the synthetic uniform stripe into recognizable star-cloud patches.
-    const dustLaneLatitude = latitude - latitudeCenter;
-    const dustLane = 0.34 + 0.66 * (1 - Math.exp(-Math.pow(dustLaneLatitude / 0.018, 2)));
-    const cloud = 0.68
-      + 0.18 * Math.sin(longitudeOffset * 5.0 + 0.7)
-      + 0.12 * Math.sin(longitudeOffset * 17.0 - dustLaneLatitude * 90.0);
-    const brightness = Math.max(0.12, (0.52 + centerStrength * 0.68) * dustLane * cloud)
-      * (0.72 + random() * 0.34);
-    const warmCenter = centerStrength * 0.2;
-    colors.push(brightness, brightness * (0.9 + warmCenter), brightness * (1.08 - warmCenter));
+    scenePosition.length = 0;
+    pushEquatorialToEclipticScene(eqX, eqY, eqZ, scenePosition);
+    positions.setXYZ(index, scenePosition[0], scenePosition[1], scenePosition[2]);
   }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  const material = new THREE.PointsMaterial({
-    map: starTexture,
-    size: 0.52,
-    vertexColors: true,
+  positions.needsUpdate = true;
+  geometry.computeBoundingSphere();
+
+  return new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
+    map: texture,
+    // The local texture axes map (X, Y, Z) -> Galactic (X, Z, Y), which
+    // changes handedness. DoubleSide keeps the observer-facing surface visible
+    // after that scientifically required longitude orientation is applied.
+    side: THREE.DoubleSide,
     transparent: true,
-    opacity: 0.7,
+    opacity: 0.38,
     depthWrite: false,
-    alphaTest: 0.02,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false,
-  });
-  const glowMaterial = new THREE.PointsMaterial({
-    map: starTexture,
-    size: 1.9,
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.17,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false,
-  });
-  const band = new THREE.Group();
-  band.add(new THREE.Points(geometry, glowMaterial), new THREE.Points(geometry, material));
-  return band;
+  }));
 }
 
 function createSunMaterial() {
@@ -1740,13 +1704,21 @@ function buildSolarScene(mount, options) {
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   mount.appendChild(renderer.domElement);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.06;
-  controls.minDistance = 1.2;
-  controls.maxDistance = 240;
-  controls.panSpeed = 0.72;
-  controls.rotateSpeed = 0.66;
+  const createCameraControls = (up) => {
+    camera.up.copy(up);
+    const nextControls = new OrbitControls(camera, renderer.domElement);
+    nextControls.enableDamping = true;
+    nextControls.dampingFactor = 0.06;
+    nextControls.minDistance = 1.2;
+    nextControls.maxDistance = 240;
+    nextControls.panSpeed = 0.72;
+    nextControls.rotateSpeed = 0.66;
+    return nextControls;
+  };
+  let controlFrame = options.getState().viewMode === 'helical' ? 'galactic' : 'ecliptic';
+  let controls = createCameraControls(
+    controlFrame === 'galactic' ? GALACTIC_TRAVEL_UP : ECLIPTIC_NORTH_SCENE,
+  );
   if (options.getState().viewMode === 'helical') {
     controls.target.copy(GALACTIC_TRAVEL_DIRECTION).multiplyScalar(
       options.getState().helicalView === 'rear' ? 11 : -11,
@@ -1784,7 +1756,7 @@ function buildSolarScene(mount, options) {
   scene.add(galaxy);
   const catalogStars = createCatalogStarField(starTexture);
   scene.add(catalogStars);
-  const milkyWay = createMilkyWayBand(starTexture);
+  const milkyWay = createGaiaMilkyWaySky();
   scene.add(milkyWay);
   const galaxyMap = createGalaxyMap();
   scene.add(galaxyMap.group);
@@ -2142,6 +2114,20 @@ function buildSolarScene(mount, options) {
     const delta = Math.min(clock.getDelta(), 0.05);
     visualTime += delta;
     const state = options.getState();
+    const nextControlFrame = state.viewMode === 'helical' ? 'galactic' : 'ecliptic';
+    if (nextControlFrame !== controlFrame) {
+      // OrbitControls captures camera.up when constructed. Recreate it when
+      // crossing reference frames so the helical view does not sit near the
+      // ecliptic control pole and lose most of its vertical drag range.
+      const preservedTarget = controls.target.clone();
+      controls.dispose();
+      controls = createCameraControls(
+        nextControlFrame === 'galactic' ? GALACTIC_TRAVEL_UP : ECLIPTIC_NORTH_SCENE,
+      );
+      controls.target.copy(preservedTarget);
+      controls.update();
+      controlFrame = nextControlFrame;
+    }
     sunLight.intensity = state.scaleMode === 'physical' ? 5.2 : 52;
     if (state.playing) {
       const elapsedDelta = delta * state.secondsPerSecond;
@@ -3370,7 +3356,7 @@ function App() {
               </>
             )}
             <div><span>{copy.scaleModel}</span><strong>{scaleMode === 'physical' ? 'Unified physical ratio' : 'Compressed visual scale'}</strong></div>
-            <div><span>{copy.catalogue}</span><strong>Hipparcos bright subset / ICRS</strong></div>
+            <div><span>{copy.catalogue}</span><strong>Gaia EDR3 all-sky + Hipparcos bright subset / J2000</strong></div>
             <div><span>{copy.lighting}</span><strong>Geometric eclipse + ring shadows</strong></div>
           </div>
         )}

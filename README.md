@@ -20,7 +20,7 @@ It is more than a celestial data viewer. It aims to be a window through which an
 - Rotate, zoom, pan, select celestial bodies, and keep the selected target centered.
 - Inspect radius, orbital and rotation periods, gravity, escape velocity, and other celestial data.
 - View synchronized UTC, Beijing time, and the Chinese lunar calendar.
-- Experience real celestial textures, a J2000-aligned procedural Milky Way with a galactic bulge and dust lane, catalogue stars, orbital paths, and motion trails.
+- Experience real celestial textures, a J2000-aligned Gaia EDR3 all-sky Milky Way map, catalogue stars, orbital paths, and motion trails.
 - Use a mobile-first interface with an immersive floating header, collapsible controls, touch-friendly celestial navigation, and scrollable detail panels.
 
 ## Visual Concepts
@@ -71,7 +71,7 @@ The mobile layout keeps the 3D scene dominant and moves dense controls into an e
 
 - Planet positions use [Astronomy Engine](https://github.com/cosinekitty/astronomy) heliocentric state vectors in the J2000 equatorial frame, transformed into the scene's J2000 ecliptic frame. Each Artistic Spiral trail derives its instantaneous orbital plane from the planet's position and velocity angular-momentum vector, preserving its inclination and ascending-node orientation.
 - Major moon positions use compact J2000 mean-element propagation; they are visual approximations rather than Horizons/SPICE-grade satellite ephemerides.
-- The Milky Way is procedural rather than photographic, but its conventional Galactic plane and Hipparcos stars are transformed from Galactic/ICRS coordinates through J2000 equatorial coordinates into the same J2000 ecliptic scene frame used by the planets. This preserves the approximately `60.19°` Galactic-plane/ecliptic-plane angle. The physical dynamical-center anchor uses the observed Sgr A* position (`λ 266.8517°`, `β −5.6077°`) rather than treating the historical Galactic-coordinate origin as identical to Sgr A*. Density, bulge width, star clouds, and the central dust lane remain visual models.
+- The Solar System sky uses ESA/Gaia EDR3's equirectangular all-sky colour map, built from the measured total brightness and colour of more than 1.8 billion stars. Its Galactic coordinates and the Hipparcos bright-star layer are transformed through J2000 equatorial coordinates into the same J2000 ecliptic scene frame used by the planets, preserving the approximately `60.19°` Galactic-plane/ecliptic-plane angle. The visible central concentration, dust absorption lanes, star clouds, and Magellanic Clouds therefore come from survey data rather than procedural density parameters. The map is an integrated sky projection seen from the Solar System, not a complete 3D reconstruction of the Galaxy.
 - The face-on Galaxy subview uses ESA/Gaia's data-informed artist impression. Its Sun marker is calibrated to the annotated 8.2 kpc position; other structure labels are approximate anchors copied from the annotated model view, not measured boundaries. This is neither a photograph nor a full 3D stellar-density map.
 - Visual mode compresses body sizes and orbital distances independently for readability. Physical mode uses one unified scale: one scene unit equals 50 million kilometres.
 - `Artistic Spiral` uses a present-day Solar Galactocentric velocity model `(U, V, W) = (9.5, 250.7, 8.56) km/s`, transformed to J2000 ecliptic longitude `342.2°` and latitude `61.0°`. The orientation is data-based; trail distance and pitch remain visually compressed and are not a scale model of the full Galactic orbit.
@@ -104,4 +104,4 @@ The project is deployed automatically through [GitHub Actions](.github/workflows
 
 ## Data and Asset Notes
 
-Planet positions are suitable for interactive visualization, not spacecraft navigation or professional observation planning. Moon propagation, visual scale compression, the procedural Milky Way, and motion trails remain approximations or artistic interpretations. Texture sources and licensing details are documented in [ATTRIBUTION.md](public/textures/ATTRIBUTION.md).
+Planet positions are suitable for interactive visualization, not spacecraft navigation or professional observation planning. Moon propagation, visual scale compression, the face-on Galaxy reconstruction, and motion trails remain approximations or artistic interpretations. The Gaia background is an observed integrated all-sky projection, not a distance-resolved 3D stellar map. Texture sources and licensing details are documented in [ATTRIBUTION.md](public/textures/ATTRIBUTION.md).
