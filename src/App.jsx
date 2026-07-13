@@ -1099,8 +1099,7 @@ function createGaiaMilkyWaySky() {
 
   const material = new THREE.ShaderMaterial({
     uniforms: {
-      uGaiaMap: { value: texture },
-      uIntensity: { value: 0.72 },
+      uSkyMap: { value: texture },
     },
     vertexShader: `
       varying vec2 vUv;
@@ -1111,80 +1110,22 @@ function createGaiaMilkyWaySky() {
       }
     `,
     fragmentShader: `
-      uniform sampler2D uGaiaMap;
-      uniform float uIntensity;
+      uniform sampler2D uSkyMap;
       varying vec2 vUv;
 
-      float hash(vec3 p) {
-        p = fract(p * 0.3183099 + 0.1);
-        p *= 17.0;
-        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
-      }
-
-      float noise(vec3 p) {
-        vec3 i = floor(p);
-        vec3 f = fract(p);
-        f = f * f * (3.0 - 2.0 * f);
-        return mix(
-          mix(mix(hash(i), hash(i + vec3(1.0, 0.0, 0.0)), f.x), mix(hash(i + vec3(0.0, 1.0, 0.0)), hash(i + vec3(1.0, 1.0, 0.0)), f.x), f.y),
-          mix(mix(hash(i + vec3(0.0, 0.0, 1.0)), hash(i + vec3(1.0, 0.0, 1.0)), f.x), mix(hash(i + vec3(0.0, 1.0, 1.0)), hash(i + vec3(1.0, 1.0, 1.0)), f.x), f.y),
-          f.z
-        );
-      }
-
-      float fbm(vec3 p) {
-        float value = 0.0;
-        float amplitude = 0.52;
-        for (int octave = 0; octave < 4; octave++) {
-          value += noise(p) * amplitude;
-          p = p * 2.03 + vec3(7.1, 11.7, 5.3);
-          amplitude *= 0.48;
-        }
-        return value;
-      }
-
       void main() {
-        vec3 surveyColor = texture2D(uGaiaMap, vUv).rgb;
-        float luminance = dot(surveyColor, vec3(0.2126, 0.7152, 0.0722));
-
-        float longitude = (0.5 - vUv.x) * 6.28318530718;
-        float latitude = (vUv.y - 0.5) * 3.14159265359;
-        vec3 galacticDirection = vec3(
-          cos(latitude) * cos(longitude),
-          cos(latitude) * sin(longitude),
-          sin(latitude)
-        );
-
-        // Gaia remains the source of truth for the large-scale Milky Way,
-        // Galactic-center, and dust-lane placement. Seamless 3D procedural
-        // detail restores sub-pixel variation lost in the 2K survey texture;
-        // it modulates measured structure rather than inventing a new Galaxy.
-        float measuredSignal = 1.0 - exp(-max(luminance - 0.035, 0.0) * 4.2);
-        float wrappedLongitude = abs(atan(sin(longitude), cos(longitude)));
-        float bulge = exp(-pow(wrappedLongitude / 0.52, 2.0));
-        float clouds = fbm(galacticDirection * 8.5 + vec3(2.4, 8.1, 4.7));
-        float filaments = fbm(galacticDirection * 31.0 + vec3(13.2, 3.7, 9.4));
-        float grain = noise(galacticDirection * 240.0 + vec3(5.2, 17.3, 1.8));
-        float bandWidth = 0.075 + bulge * 0.12 + clouds * 0.025;
-        float bandEnvelope = exp(-pow(abs(latitude) / bandWidth, 1.42));
-        float gaiaStructure = smoothstep(0.045, 0.30, luminance);
-        float guidedDensity = bandEnvelope
-          * mix(0.28, 1.08, gaiaStructure)
-          * mix(0.34, 1.0, measuredSignal);
-        float dustGrain = noise(galacticDirection * 18.0 + vec3(9.3, 2.8, 14.1));
-        float dust = smoothstep(0.48, 0.75, filaments * 0.72 + dustGrain * 0.28);
-        float extinction = 1.0 - dust * bandEnvelope * 0.58;
-        float proceduralDetail = mix(0.82, 1.22, clouds)
-          * mix(0.88, 1.14, filaments)
-          * mix(0.95, 1.07, grain);
-        float reconstructedLight = guidedDensity * proceduralDetail * extinction;
-
-        vec3 surveyHue = surveyColor / max(luminance, 0.001);
-        surveyHue = mix(vec3(0.82, 0.88, 1.0), surveyHue, 0.58);
-        vec3 nightSkyColor = surveyHue * reconstructedLight * uIntensity;
-        float visibility = smoothstep(0.012, 0.30, reconstructedLight);
-
-        gl_FragColor = vec4(nightSkyColor, visibility * 0.58);
+        // Compress the displayed Galactic latitude so the complete Gaia map is
+        // concentrated into the original remote luminous band instead of being
+        // enlarged across the whole sky. Longitude and measured dust structure
+        // remain untouched, while vertical source-pixel density increases 4.2x.
+        float surveyV = 0.5 + (vUv.y - 0.5) * 4.2;
+        if (surveyV <= 0.0 || surveyV >= 1.0) discard;
+        vec3 observed = texture2D(uSkyMap, vec2(vUv.x, surveyV), 1.15).rgb;
+        vec3 signal = max(observed - vec3(0.09), vec3(0.0));
+        float luminance = dot(signal, vec3(0.2126, 0.7152, 0.0722));
+        float visibility = smoothstep(0.018, 0.28, luminance);
+        vec3 distantGlow = pow(signal * 3.05, vec3(0.82));
+        gl_FragColor = vec4(distantGlow, visibility * 0.68);
       }
     `,
     side: THREE.DoubleSide,
