@@ -127,7 +127,7 @@ p {
 
 .time-strip {
   display: grid;
-  grid-template-columns: repeat(3, minmax(168px, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -226,6 +226,47 @@ p {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.share-controls {
+  position: relative;
+  display: flex;
+  gap: 6px;
+}
+
+.controls .share-controls button {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+
+.copy-icon {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.share-notice {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 4;
+  padding: 6px 9px;
+  border: 1px solid rgba(125, 248, 255, 0.34);
+  border-radius: 6px;
+  background: rgba(5, 14, 25, 0.94);
+  color: #dffcff !important;
+  font-size: 11px !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+  white-space: nowrap;
 }
 
 .speed-control span {
@@ -1141,6 +1182,10 @@ kbd {
     height: auto;
     gap: 14px;
     padding: 16px;
+  }
+
+  .controls {
+    flex-wrap: wrap;
   }
 
   .time-strip {

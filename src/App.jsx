@@ -70,6 +70,7 @@ const ui = {
     mapBoundary: 'Data-informed artist impression, not an external photograph or direct density map',
     drift: 'Forward drift', wheel: 'Wheel', zoom: 'Zoom', leftClick: 'Left drag', rotate: 'Rotate',
     rightClick: 'Right drag', pan: 'Pan', select: 'Select', focusBody: 'Focus body',
+    copySite: 'Copy site', copyView: 'Copy current view', copied: 'Link copied', copyFailed: 'Copy failed',
     inRange: 'EPHEMERIS IN RANGE', outRange: 'EPHEMERIS OUT OF RANGE',
     physicalScale: 'Unified scale: 1 scene unit = 50 million km.', visualScale: 'Visual scale: sizes and distances are compressed separately.',
     orbitDescription: 'Top-down system view for comparing positions and orbital scale.',
@@ -94,6 +95,7 @@ const ui = {
     mapBoundary: '基于数据的艺术重建图，并非系外实拍或直接恒星密度图',
     drift: '前进距离', wheel: '滚轮', zoom: '缩放', leftClick: '左键拖动', rotate: '旋转',
     rightClick: '右键拖动', pan: '平移', select: '选择', focusBody: '聚焦天体',
+    copySite: '复制站点', copyView: '复制当前视角', copied: '链接已复制', copyFailed: '复制失败',
     inRange: '星历有效范围内', outRange: '超出星历有效范围',
     physicalScale: '统一比例：1 场景单位 = 5000 万 km。', visualScale: '视觉比例：尺寸与距离分别压缩。',
     orbitDescription: '俯视完整轨道结构，适合比较行星位置与系统尺度。',
@@ -1642,6 +1644,13 @@ function buildSolarScene(mount, options) {
   if (options.getState().viewMode === 'helical') {
     controls.target.set(0, 0, options.getState().helicalView === 'rear' ? 11 : -11);
   }
+  const initialCameraPose = options.getState().cameraPose;
+  if (initialCameraPose) {
+    camera.position.fromArray(initialCameraPose.position);
+    controls.target.fromArray(initialCameraPose.target);
+    camera.fov = THREE.MathUtils.clamp(initialCameraPose.fov, 20, 100);
+    camera.updateProjectionMatrix();
+  }
 
   // Keep a small cool floor so texture detail survives in space without
   // flattening the day/night boundary created by the Sun.
@@ -2232,7 +2241,16 @@ function buildSolarScene(mount, options) {
       || state.helicalView !== lastHelicalView
       || state.cameraRevision !== lastCameraRevision;
     if (cameraTargetChanged) {
-      cameraTransition = 1;
+      if (state.cameraPose) {
+        camera.position.fromArray(state.cameraPose.position);
+        controls.target.fromArray(state.cameraPose.target);
+        currentLook.copy(controls.target);
+        camera.fov = THREE.MathUtils.clamp(state.cameraPose.fov, 20, 100);
+        camera.updateProjectionMatrix();
+        cameraTransition = 0;
+      } else {
+        cameraTransition = 1;
+      }
       lastSelectedId = state.selectedId;
       lastViewMode = state.viewMode;
       lastOrbitScope = state.orbitScope;
@@ -2317,6 +2335,13 @@ function buildSolarScene(mount, options) {
   animate();
 
   return {
+    getCameraPose() {
+      return {
+        position: camera.position.toArray(),
+        target: controls.target.toArray(),
+        fov: camera.fov,
+      };
+    },
     dispose() {
       cancelAnimationFrame(raf);
       window.removeEventListener('resize', resize);
@@ -2391,24 +2416,168 @@ function AtmosphereIcon({ className = '' }) {
   );
 }
 
+function CopyIcon() {
+  return (
+    <svg className="copy-icon" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="8" y="8" width="11" height="11" rx="2" />
+      <path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2" />
+    </svg>
+  );
+}
+
+const SHARE_ROUTE_PREFIXES = {
+  orbit: 'orbit',
+  helical: 'artistic-spiral',
+  follow: 'follow',
+};
+
+function readShareRoute(hash = window.location.hash) {
+  const hashValue = hash.replace(/^#\/?/, '');
+  const [route, query = ''] = hashValue.split('?');
+  const params = new URLSearchParams(query);
+  const segments = route.split('/').filter(Boolean).map((segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return '';
+    }
+  });
+  const fallback = {
+    viewMode: DEFAULT_VIEW_MODE,
+    orbitScope: DEFAULT_ORBIT_SCOPE,
+    helicalView: DEFAULT_HELICAL_VIEW,
+    selectedId: 'sun',
+    selectedGalaxyFeature: 'solar-system',
+    scaleMode: 'visual',
+    speedIndex: DEFAULT_SPEED_INDEX,
+    playing: true,
+    autoFollow: true,
+    cameraPose: null,
+  };
+  const speedIndex = simulationSpeeds.findIndex(({ label }) => label === params.get('speed'));
+  const cameraValues = params.get('camera')?.split(',').map(Number);
+  const cameraPose = cameraValues?.length === 7 && cameraValues.every(Number.isFinite)
+    ? { position: cameraValues.slice(0, 3), target: cameraValues.slice(3, 6), fov: cameraValues[6] }
+    : null;
+  const sharedState = {
+    speedIndex: speedIndex >= 0 ? speedIndex : fallback.speedIndex,
+    playing: params.get('playing') !== 'false',
+    autoFollow: cameraPose ? params.get('follow') === 'true' : true,
+    cameraPose,
+  };
+
+  if (segments[0] === SHARE_ROUTE_PREFIXES.orbit) {
+    const orbitScope = segments[1] === 'galaxy' ? 'galaxy' : 'solar';
+    if (orbitScope === 'galaxy') {
+      const selectedGalaxyFeature = galaxyFeatures.some(({ id }) => id === segments[2])
+        ? segments[2]
+        : fallback.selectedGalaxyFeature;
+      return { ...fallback, ...sharedState, viewMode: 'orbit', orbitScope, selectedGalaxyFeature };
+    }
+    const selectedId = bodyMap[segments[2]] ? segments[2] : fallback.selectedId;
+    return {
+      ...fallback, ...sharedState,
+      viewMode: 'orbit',
+      selectedId,
+      scaleMode: segments[3] === 'physical' ? 'physical' : 'visual',
+    };
+  }
+
+  if (segments[0] === SHARE_ROUTE_PREFIXES.helical) {
+    return {
+      ...fallback, ...sharedState,
+      viewMode: 'helical',
+      helicalView: segments[1] === 'rear' ? 'rear' : 'front',
+      selectedId: bodyMap[segments[2]] ? segments[2] : fallback.selectedId,
+    };
+  }
+
+  if (segments[0] === SHARE_ROUTE_PREFIXES.follow) {
+    return {
+      ...fallback, ...sharedState,
+      viewMode: 'follow',
+      selectedId: bodyMap[segments[1]] ? segments[1] : fallback.selectedId,
+    };
+  }
+
+  return fallback;
+}
+
+function createCurrentViewHash(state, cameraPose) {
+  const baseHash = createShareHash(state);
+  const params = new URLSearchParams({
+    speed: simulationSpeeds[state.speedIndex]?.label ?? simulationSpeeds[DEFAULT_SPEED_INDEX].label,
+    playing: String(state.playing),
+    follow: String(state.autoFollow),
+  });
+  if (cameraPose) {
+    const values = [...cameraPose.position, ...cameraPose.target, cameraPose.fov];
+    params.set('camera', values.map((value) => Number(value.toFixed(4))).join(','));
+  }
+  return `${baseHash}?${params}`;
+}
+
+async function copyToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {
+      // Fall back for embedded browsers that expose Clipboard API without write permission.
+    }
+  }
+  const input = document.createElement('textarea');
+  input.value = text;
+  input.setAttribute('readonly', '');
+  input.style.position = 'fixed';
+  input.style.opacity = '0';
+  document.body.appendChild(input);
+  input.select();
+  const copied = document.execCommand('copy');
+  input.remove();
+  if (!copied) throw new Error('Clipboard unavailable');
+}
+
+function createShareHash({
+  viewMode,
+  orbitScope,
+  helicalView,
+  selectedId,
+  selectedGalaxyFeature,
+  scaleMode,
+}) {
+  if (viewMode === 'orbit') {
+    return orbitScope === 'galaxy'
+      ? `#/orbit/galaxy/${encodeURIComponent(selectedGalaxyFeature)}`
+      : `#/orbit/solar/${encodeURIComponent(selectedId)}/${scaleMode}`;
+  }
+  if (viewMode === 'follow') return `#/follow/${encodeURIComponent(selectedId)}`;
+  return `#/artistic-spiral/${helicalView}/${encodeURIComponent(selectedId)}`;
+}
+
 function App() {
   const mountRef = useRef(null);
   const stateRef = useRef(null);
-  const [selectedId, setSelectedId] = useState('sun');
+  const sceneRef = useRef(null);
+  const initialShareRoute = useRef(null);
+  if (!initialShareRoute.current) initialShareRoute.current = readShareRoute();
+  const [selectedId, setSelectedId] = useState(initialShareRoute.current.selectedId);
   const [filter, setFilter] = useState('');
-  const [speedIndex, setSpeedIndex] = useState(DEFAULT_SPEED_INDEX);
-  const [playing, setPlaying] = useState(true);
-  const [autoFollow, setAutoFollow] = useState(true);
-  const [viewMode, setViewMode] = useState(DEFAULT_VIEW_MODE);
-  const [orbitScope, setOrbitScope] = useState(DEFAULT_ORBIT_SCOPE);
-  const [helicalView, setHelicalView] = useState(DEFAULT_HELICAL_VIEW);
-  const [scaleMode, setScaleMode] = useState('visual');
+  const [speedIndex, setSpeedIndex] = useState(initialShareRoute.current.speedIndex);
+  const [playing, setPlaying] = useState(initialShareRoute.current.playing);
+  const [autoFollow, setAutoFollow] = useState(initialShareRoute.current.autoFollow);
+  const [viewMode, setViewMode] = useState(initialShareRoute.current.viewMode);
+  const [orbitScope, setOrbitScope] = useState(initialShareRoute.current.orbitScope);
+  const [helicalView, setHelicalView] = useState(initialShareRoute.current.helicalView);
+  const [scaleMode, setScaleMode] = useState(initialShareRoute.current.scaleMode);
   const [language, setLanguage] = useState(() => localStorage.getItem('solar-rush-language') || 'zh');
   const [detailTab, setDetailTab] = useState('overview');
-  const [selectedGalaxyFeature, setSelectedGalaxyFeature] = useState('solar-system');
+  const [selectedGalaxyFeature, setSelectedGalaxyFeature] = useState(initialShareRoute.current.selectedGalaxyFeature);
   const [additionalDataOpen, setAdditionalDataOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [cameraRevision, setCameraRevision] = useState(0);
+  const [cameraPose, setCameraPose] = useState(initialShareRoute.current.cameraPose);
+  const [shareNotice, setShareNotice] = useState('');
   const [telemetry, setTelemetry] = useState({
     simDays: 0,
     elapsedSeconds: 0,
@@ -2470,11 +2639,34 @@ function App() {
   }, [filter]);
   const planets = useMemo(() => bodies.filter((body) => body.type === 'planet'), []);
   const switchViewMode = (mode) => {
+    setCameraPose(null);
     setViewMode(mode);
     if (mode === 'orbit') setOrbitScope(DEFAULT_ORBIT_SCOPE);
     setAutoFollow(true);
     setCameraRevision((value) => value + 1);
     setMobileMenuOpen(false);
+  };
+  const shareState = {
+    viewMode,
+    orbitScope,
+    helicalView,
+    selectedId,
+    selectedGalaxyFeature,
+    scaleMode,
+    speedIndex,
+    playing,
+    autoFollow,
+  };
+  const copyShareLink = async (includeCurrentView) => {
+    const hash = includeCurrentView ? createCurrentViewHash(shareState, sceneRef.current?.getCameraPose()) : '';
+    const url = new URL(`${window.location.pathname}${hash}`, window.location.origin).href;
+    try {
+      await copyToClipboard(url);
+      setShareNotice(copy.copied);
+    } catch {
+      setShareNotice(copy.copyFailed);
+    }
+    window.setTimeout(() => setShareNotice(''), 1800);
   };
   const changeLanguage = (nextLanguage) => {
     setLanguage(nextLanguage);
@@ -2525,7 +2717,48 @@ function App() {
     language,
     selectedGalaxyFeature,
     cameraRevision,
+    cameraPose,
   };
+
+  useEffect(() => {
+    let lastAppliedHash = null;
+    const applyLocationRoute = () => {
+      if (lastAppliedHash === window.location.hash) return;
+      lastAppliedHash = window.location.hash;
+      const route = readShareRoute();
+      setViewMode(route.viewMode);
+      setOrbitScope(route.orbitScope);
+      setHelicalView(route.helicalView);
+      setSelectedId(route.selectedId);
+      setSelectedGalaxyFeature(route.selectedGalaxyFeature);
+      setScaleMode(route.scaleMode);
+      setSpeedIndex(route.speedIndex);
+      setPlaying(route.playing);
+      setAutoFollow(route.autoFollow);
+      setCameraPose(route.cameraPose);
+      setCameraRevision((value) => value + 1);
+      setMobileMenuOpen(false);
+    };
+    window.addEventListener('popstate', applyLocationRoute);
+    window.addEventListener('hashchange', applyLocationRoute);
+    return () => {
+      window.removeEventListener('popstate', applyLocationRoute);
+      window.removeEventListener('hashchange', applyLocationRoute);
+    };
+  }, []);
+
+  useEffect(() => {
+    const nextHash = createShareHash({
+      viewMode,
+      orbitScope,
+      helicalView,
+      selectedId,
+      selectedGalaxyFeature,
+      scaleMode,
+    });
+    if (window.location.hash.split('?')[0] === nextHash) return;
+    window.history.pushState(null, '', `${window.location.pathname}${window.location.search}${nextHash}`);
+  }, [viewMode, orbitScope, helicalView, selectedId, selectedGalaxyFeature, scaleMode]);
 
   useEffect(() => {
     if (!mountRef.current) return undefined;
@@ -2534,6 +2767,7 @@ function App() {
     const scene = buildSolarScene(mountRef.current, {
       getState: () => stateRef.current,
       onSelectBody: (id) => {
+        setCameraPose(null);
         setSelectedId(id);
         setAutoFollow(true);
         setCameraRevision((value) => value + 1);
@@ -2555,7 +2789,11 @@ function App() {
         setTelemetry(nextTelemetry);
       },
     });
-    return () => scene.dispose();
+    sceneRef.current = scene;
+    return () => {
+      sceneRef.current = null;
+      scene.dispose();
+    };
   }, []);
 
   const showTimeOfDay = secondsPerSecond < 86_400;
@@ -2625,7 +2863,11 @@ function App() {
         </div>
         <div className="controls">
           <div className="transport-controls" aria-label="time controls">
-            <button type="button" aria-label={copy.reset} onClick={() => setCameraRevision((value) => value + 1)}>↺</button>
+            <button type="button" aria-label={copy.reset} onClick={() => {
+              setCameraPose(null);
+              setAutoFollow(true);
+              setCameraRevision((value) => value + 1);
+            }}>↺</button>
             <button type="button" aria-label={playing ? copy.pause : copy.play} className={playing ? 'active' : ''} onClick={() => setPlaying((value) => !value)}>
               {playing ? 'Ⅱ' : '▶'}
             </button>
@@ -2642,6 +2884,11 @@ function App() {
               ))}
             </select>
           </label>
+          <div className="share-controls" aria-label={language === 'zh' ? '分享' : 'Share'}>
+            <button type="button" onClick={() => copyShareLink(false)}><CopyIcon />{copy.copySite}</button>
+            <button type="button" onClick={() => copyShareLink(true)}><CopyIcon />{copy.copyView}</button>
+            {shareNotice && <span className="share-notice" role="status">{shareNotice}</span>}
+          </div>
           <div className="language-switcher" aria-label="Language">
             <button type="button" className={language === 'zh' ? 'active' : ''} onClick={() => changeLanguage('zh')}>中</button>
             <button type="button" className={language === 'en' ? 'active' : ''} onClick={() => changeLanguage('en')}>EN</button>
@@ -2711,6 +2958,7 @@ function App() {
           <div className="body-group">
             <h2>{copy.star}</h2>
             <BodyButton body={bodyMap.sun} selectedId={selectedId} language={language} locale={locale} onSelect={(id) => {
+              setCameraPose(null);
               setSelectedId(id);
               setAutoFollow(true);
               setCameraRevision((value) => value + 1);
@@ -2728,6 +2976,7 @@ function App() {
               <div className="tree-node" key={planet.id}>
                 {planetVisible && (
                   <BodyButton body={planet} selectedId={selectedId} language={language} locale={locale} onSelect={(id) => {
+                    setCameraPose(null);
                     setSelectedId(id);
                     setAutoFollow(true);
                     setCameraRevision((value) => value + 1);
@@ -2738,6 +2987,7 @@ function App() {
                   <div className="moon-branch">
                     {visibleMoons.map((moon) => (
                       <BodyButton key={moon.id} body={moon} selectedId={selectedId} language={language} locale={locale} nested onSelect={(id) => {
+                        setCameraPose(null);
                         setSelectedId(id);
                         setAutoFollow(true);
                         setCameraRevision((value) => value + 1);
@@ -2935,6 +3185,7 @@ function App() {
               type="checkbox"
               checked={scaleMode === 'physical'}
               onChange={(event) => {
+                setCameraPose(null);
                 setScaleMode(event.target.checked ? 'physical' : 'visual');
                 setViewMode('orbit');
                 setOrbitScope('solar');
@@ -2968,6 +3219,7 @@ function App() {
               type="button"
               className={orbitScope === 'solar' ? 'active' : ''}
               onClick={() => {
+                setCameraPose(null);
                 setOrbitScope('solar');
                 setCameraRevision((value) => value + 1);
               }}
@@ -2978,6 +3230,7 @@ function App() {
               type="button"
               className={orbitScope === 'galaxy' ? 'active' : ''}
               onClick={() => {
+                setCameraPose(null);
                 setOrbitScope('galaxy');
                 setScaleMode('visual');
                 setAutoFollow(true);
@@ -2994,6 +3247,7 @@ function App() {
               type="button"
               className={helicalView === 'front' ? 'active' : ''}
               onClick={() => {
+                setCameraPose(null);
                 setHelicalView('front');
                 setAutoFollow(true);
                 setCameraRevision((value) => value + 1);
@@ -3005,6 +3259,7 @@ function App() {
               type="button"
               className={helicalView === 'rear' ? 'active' : ''}
               onClick={() => {
+                setCameraPose(null);
                 setHelicalView('rear');
                 setAutoFollow(true);
                 setCameraRevision((value) => value + 1);
