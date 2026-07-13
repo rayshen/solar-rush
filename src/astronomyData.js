@@ -51,6 +51,20 @@ export const solarGalactocentricMotion = {
   j2000EclipticLatitudeDeg: 60.98,
 };
 
+// JPL osculating elements for 1P/Halley at MJD 49400 (J2000 ecliptic).
+// This compact Keplerian propagation preserves the characteristic retrograde
+// orbit but does not include the planetary perturbations used by Horizons.
+// Source: https://ssd.jpl.nasa.gov/sb/elem_tables.html
+export const halleyOrbit = {
+  epochMjdTdb: 49_400,
+  perihelionDistanceAu: 0.58597811,
+  eccentricity: 0.96714291,
+  inclinationDeg: 162.26269,
+  argumentPerihelionDeg: 111.33249,
+  ascendingNodeDeg: 58.42008,
+  perihelionPassageTdb: '1986-02-05T21:29:16Z',
+};
+
 // JPL mean satellite elements. Epoch J2000.0 TDB. Angles are degrees.
 // These are mean-element propagations, not a substitute for Horizons/SPICE.
 export const satelliteMeanElements = {

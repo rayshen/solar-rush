@@ -42,6 +42,18 @@ stellar-density map or a photograph taken from outside the Galaxy.
 - Credits: ESA/Gaia/DPAC, Stefan Payne-Wardenaar
 - License: CC BY-SA 3.0 IGO
 
+## NASA Scientific Visualization Studio
+
+The 8K celestial-sphere texture in `galaxy/sky/` is derived from
+the Milky Way background layer of NASA SVS Deep Star Maps 2020. The source is
+an ICRF/J2000 plate carrée map designed for spherical mapping and was built
+from Hipparcos-2, Tycho-2, and Gaia DR2 catalogue data. The web assets are
+tone-mapped from NASA's linear OpenEXR files and GPU-compressed as KTX2.
+
+- Source: https://svs.gsfc.nasa.gov/4851/
+- Visualization: Ernie Wright, NASA Scientific Visualization Studio
+- Asset: `milkyway_2020_8k.exr`
+
 The spiral-arm, bulge, and bar thumbnails in `galaxy/features/` are crops of
 the same ESA/Gaia face-on reconstruction. They are model images, not external
 photographs of individual spiral arms.

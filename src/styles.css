@@ -429,6 +429,12 @@ p {
   padding: 12px;
 }
 
+@media (min-width: 1241px) {
+  .app-shell:has(.view-subviews) .right-panel {
+    bottom: 254px;
+  }
+}
+
 .panel-title {
   display: flex;
   align-items: center;

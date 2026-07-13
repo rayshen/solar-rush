@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import {
   Body as AstronomyBody,
   HelioState,
@@ -10,9 +11,10 @@ import {
   RotateVector,
   Rotation_EQJ_ECL,
 } from 'astronomy-engine';
-import { bodies, bodyMap, planetEphemerisElements } from './solarData.js';
+import { AU, bodies, bodyMap, planetEphemerisElements } from './solarData.js';
 import {
   brightStarCatalog,
+  halleyOrbit,
   sagittariusAStar,
   satelliteMeanElements,
   solarGalactocentricMotion,
@@ -25,8 +27,20 @@ const MIN_UI_TIME_UPDATE_INTERVAL_MS = 16;
 const J2000_MS = Date.UTC(2000, 0, 1, 12);
 const START_DATE = new Date();
 const PHYSICAL_KM_PER_UNIT = 50_000_000;
-const PHYSICAL_ORBIT_CAMERA_BIAS = new THREE.Vector3(0, 135, 125);
+const PHYSICAL_AU_PER_UNIT = AU / PHYSICAL_KM_PER_UNIT;
+const PHYSICAL_ORBIT_CAMERA_BIAS = new THREE.Vector3(0, 245, 225);
+const HALLEY_SEMI_MAJOR_AXIS_AU = halleyOrbit.perihelionDistanceAu / (1 - halleyOrbit.eccentricity);
+const HALLEY_ORBIT_PERIOD_DAYS = 365.2568983 * Math.pow(HALLEY_SEMI_MAJOR_AXIS_AU, 1.5);
+const HALLEY_PERIHELION_MS = Date.parse(halleyOrbit.perihelionPassageTdb);
+const HALLEY_VISUAL_SEMI_MAJOR_AXIS = 25.8;
+const HALLEY_BODY = {
+  id: 'halley',
+  orbitRadius: HALLEY_VISUAL_SEMI_MAJOR_AXIS,
+};
 const GALAXY_MAP_SIZE = 250;
+// Keep the full galactic disk close to the reference desktop composition:
+// large enough to dominate the canvas, with its outer arms still readable.
+const GALAXY_DESKTOP_FILL = 1.6;
 // Crop the square map beyond the short viewport edge so the galaxy disk fills
 // mobile screens while retaining roughly 90% of its visible structure.
 const GALAXY_MOBILE_FILL = 1.8;
@@ -121,9 +135,9 @@ const ui = {
     copied: 'Link copied', copyFailed: 'Copy failed',
     inRange: 'EPHEMERIS IN RANGE', outRange: 'EPHEMERIS OUT OF RANGE',
     physicalScale: 'Unified scale: 1 scene unit = 50 million km.', visualScale: 'Visual scale: sizes and distances are compressed separately.',
-    orbitDescription: 'Top-down system view for comparing positions and orbital scale.',
+    orbitDescription: 'Top-down system view with the main asteroid belt, Kuiper Belt, and the JPL osculating orbit of 1P/Halley.',
     galaxyDescription: 'ESA/Gaia data-informed artist impression. The Solar System lies in the Orion Spur, about 26,600 light-years from the Galactic center.',
-    helicalDescription: 'Unified J2000 ecliptic frame: Galactic plane–ecliptic 60.19°; Sgr A* λ 266.8517°, β −5.6077°; present Galactocentric velocity λ 342.2°, β 61.0°. Trail scale is compressed.',
+    helicalDescription: 'Unified J2000 ecliptic frame: Galactic plane–ecliptic 60.19°; Sgr A* λ 266.8517°, β −5.6077°; present Galactocentric velocity λ 342.2°, β 61.0°. 1P/Halley follows its JPL retrograde orbit; trail scale is compressed.',
     followDescription: 'Follow the selected body and emphasize its local system and trajectory.',
   },
   zh: {
@@ -149,9 +163,9 @@ const ui = {
     copied: '链接已复制', copyFailed: '复制失败',
     inRange: '星历有效范围内', outRange: '超出星历有效范围',
     physicalScale: '统一比例：1 场景单位 = 5000 万 km。', visualScale: '视觉比例：尺寸与距离分别压缩。',
-    orbitDescription: '俯视完整轨道结构，适合比较行星位置与系统尺度。',
+    orbitDescription: '俯视完整轨道结构，包含主小行星带、柯伊伯带与哈雷彗星的 JPL 瞬时轨道。',
     galaxyDescription: '基于 ESA/Gaia 数据制作的艺术重建俯视图：太阳系位于猎户支臂，距银心约 2.66 万光年。',
-    helicalDescription: '统一 J2000 黄道坐标：银道面—黄道面 60.19°；Sgr A* 黄经 266.8517°、黄纬 −5.6077°；当前银心速度方向为黄经 342.2°、黄纬 61.0°。光迹尺度经过压缩。',
+    helicalDescription: '统一 J2000 黄道坐标：银道面—黄道面 60.19°；Sgr A* 黄经 266.8517°、黄纬 −5.6077°；当前银心速度方向为黄经 342.2°、黄纬 61.0°。哈雷彗星沿 JPL 逆行轨道运动，光迹尺度经过压缩。',
     followDescription: '跟随选中天体，仅突出它的主轨迹与局部系统。',
   },
 };
@@ -288,7 +302,7 @@ const galaxyFeatureDetails = {
   },
 };
 
-const trailBodyIds = ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune'];
+const trailBodyIds = ['mercury', 'venus', 'earth', 'mars', 'jupiter', 'saturn', 'uranus', 'neptune', 'halley'];
 const trailColors = {
   mercury: '#d9d2c8',
   venus: '#ffd57a',
@@ -298,6 +312,7 @@ const trailColors = {
   saturn: '#f0d08a',
   uranus: '#68f1ff',
   neptune: '#4f7cff',
+  halley: '#bcecff',
 };
 
 const astronomyPlanetBodies = {
@@ -454,6 +469,16 @@ function setPlanetScenePosition(id, date, sceneSemiMajorAxis, out, orbitEccentri
 }
 
 function setPlanetOrbitNormal(id, date, out) {
+  if (id === 'halley') {
+    const inclination = THREE.MathUtils.degToRad(halleyOrbit.inclinationDeg);
+    const node = THREE.MathUtils.degToRad(halleyOrbit.ascendingNodeDeg);
+    const sinInclination = Math.sin(inclination);
+    return out.set(
+      sinInclination * Math.sin(node),
+      Math.cos(inclination),
+      sinInclination * Math.cos(node),
+    ).normalize();
+  }
   const astronomyBody = astronomyPlanetBodies[id];
   if (astronomyBody) {
     const eclipticState = RotateState(EQJ_TO_ECL, HelioState(astronomyBody, date));
@@ -503,6 +528,34 @@ function setSatelliteScenePosition(body, date, sceneSemiMajorAxis, out) {
   return out.set(px * scale, pz * scale, -py * scale);
 }
 
+function setHalleyScenePosition(date, sceneSemiMajorAxis, out, orbitEccentricAnomaly = null) {
+  const meanAnomaly = ((date.getTime() - HALLEY_PERIHELION_MS) / DAY_MS)
+    / HALLEY_ORBIT_PERIOD_DAYS
+    * Math.PI * 2;
+  const eccentricAnomaly = orbitEccentricAnomaly ?? solveEccentricAnomaly(
+    THREE.MathUtils.euclideanModulo(meanAnomaly, Math.PI * 2),
+    halleyOrbit.eccentricity,
+  );
+  const orbitalX = HALLEY_SEMI_MAJOR_AXIS_AU
+    * (Math.cos(eccentricAnomaly) - halleyOrbit.eccentricity);
+  const orbitalY = HALLEY_SEMI_MAJOR_AXIS_AU
+    * Math.sqrt(1 - halleyOrbit.eccentricity * halleyOrbit.eccentricity)
+    * Math.sin(eccentricAnomaly);
+  const argument = THREE.MathUtils.degToRad(halleyOrbit.argumentPerihelionDeg);
+  const node = THREE.MathUtils.degToRad(halleyOrbit.ascendingNodeDeg);
+  const inclination = THREE.MathUtils.degToRad(halleyOrbit.inclinationDeg);
+  const cosA = Math.cos(argument); const sinA = Math.sin(argument);
+  const cosN = Math.cos(node); const sinN = Math.sin(node);
+  const cosI = Math.cos(inclination); const sinI = Math.sin(inclination);
+  const eclipticX = (cosA * cosN - sinA * sinN * cosI) * orbitalX
+    + (-sinA * cosN - cosA * sinN * cosI) * orbitalY;
+  const eclipticY = (cosA * sinN + sinA * cosN * cosI) * orbitalX
+    + (-sinA * sinN + cosA * cosN * cosI) * orbitalY;
+  const eclipticZ = sinA * sinI * orbitalX + cosA * sinI * orbitalY;
+  const sceneScale = sceneSemiMajorAxis / HALLEY_SEMI_MAJOR_AXIS_AU;
+  return out.set(eclipticX * sceneScale, eclipticZ * sceneScale, -eclipticY * sceneScale);
+}
+
 function createPlanetOrbitLine(body, date, color, opacity = 0.28) {
   const points = [];
   const point = new THREE.Vector3();
@@ -516,6 +569,45 @@ function createPlanetOrbitLine(body, date, color, opacity = 0.28) {
     transparent: true,
     opacity,
     depthWrite: false,
+  });
+  return new THREE.Line(geometry, material);
+}
+
+function createHalleyOrbitLine() {
+  const points = [];
+  const point = new THREE.Vector3();
+  for (let index = 0; index <= 720; index += 1) {
+    setHalleyScenePosition(
+      START_DATE,
+      HALLEY_VISUAL_SEMI_MAJOR_AXIS,
+      point,
+      (index / 720) * Math.PI * 2,
+    );
+    points.push(point.clone());
+  }
+  return new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints(points),
+    new THREE.LineBasicMaterial({
+      color: '#8dcbe8',
+      transparent: true,
+      opacity: 0.42,
+      depthWrite: false,
+    }),
+  );
+}
+
+function createCometTailLine(color) {
+  const geometry = new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(),
+    new THREE.Vector3(),
+  ]);
+  const material = new THREE.LineBasicMaterial({
+    color,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    toneMapped: false,
   });
   return new THREE.Line(geometry, material);
 }
@@ -537,6 +629,256 @@ function createOrbitLine(radius, eccentricity, color, opacity = 0.32) {
     depthWrite: false,
   });
   return new THREE.Line(geometry, material);
+}
+
+function createSmallBodyBelt(starTexture, options) {
+  const { count } = options;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+  const semiMajorAxes = new Float32Array(count);
+  const visualSemiMajorAxes = new Float32Array(count);
+  const eccentricities = new Float32Array(count);
+  const inclinations = new Float32Array(count);
+  const nodes = new Float32Array(count);
+  const periapses = new Float32Array(count);
+  const meanAnomalies = new Float32Array(count);
+  const meanMotions = new Float32Array(count);
+  let seed = options.seed;
+  const random = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  let index = 0;
+  while (index < count) {
+    const orbit = options.sampleOrbit(random);
+    if (!orbit) continue;
+    const { semiMajorAxis, eccentricity, inclination } = orbit;
+    semiMajorAxes[index] = semiMajorAxis;
+    visualSemiMajorAxes[index] = options.visualSemiMajorAxisFor(semiMajorAxis);
+    eccentricities[index] = eccentricity;
+    inclinations[index] = inclination;
+    nodes[index] = random() * Math.PI * 2;
+    periapses[index] = random() * Math.PI * 2;
+    meanAnomalies[index] = random() * Math.PI * 2;
+    meanMotions[index] = Math.PI * 2 / (365.256 * Math.pow(semiMajorAxis, 1.5));
+
+    const color = options.sampleColor(random);
+    const colorIndex = index * 3;
+    colors[colorIndex] = color[0];
+    colors[colorIndex + 1] = color[1];
+    colors[colorIndex + 2] = color[2];
+    index += 1;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  const positionAttribute = new THREE.BufferAttribute(positions, 3);
+  positionAttribute.setUsage(THREE.DynamicDrawUsage);
+  geometry.setAttribute('position', positionAttribute);
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const material = new THREE.PointsMaterial({
+    map: starTexture,
+    size: options.visualSize,
+    vertexColors: true,
+    transparent: true,
+    opacity: options.visualOpacity,
+    alphaTest: 0.08,
+    depthWrite: false,
+    toneMapped: false,
+  });
+  const belt = new THREE.Points(geometry, material);
+  belt.frustumCulled = false;
+  belt.renderOrder = -1;
+  belt.userData.orbits = {
+    count,
+    positions,
+    semiMajorAxes,
+    visualSemiMajorAxes,
+    eccentricities,
+    inclinations,
+    nodes,
+    periapses,
+    meanAnomalies,
+    meanMotions,
+    visualSize: options.visualSize,
+    physicalSize: options.physicalSize,
+    visualOpacity: options.visualOpacity,
+    physicalOpacity: options.physicalOpacity,
+  };
+  return belt;
+}
+
+function rayleighInclination(random, sigmaDegrees, maximumDegrees) {
+  return Math.min(
+    THREE.MathUtils.degToRad(maximumDegrees),
+    Math.sqrt(-2 * Math.log(Math.max(1e-6, 1 - random())))
+      * THREE.MathUtils.degToRad(sigmaDegrees),
+  );
+}
+
+function createAsteroidBelt(starTexture) {
+  const marsAxis = planetEphemerisElements.mars.base[0];
+  const jupiterAxis = planetEphemerisElements.jupiter.base[0];
+  return createSmallBodyBelt(starTexture, {
+    count: 3_200,
+    seed: 0xa57e10d,
+    visualSize: 0.13,
+    physicalSize: 0.24,
+    visualOpacity: 0.76,
+    physicalOpacity: 0.86,
+    visualSemiMajorAxisFor: (semiMajorAxis) => THREE.MathUtils.lerp(
+      bodyMap.mars.orbitRadius,
+      bodyMap.jupiter.orbitRadius,
+      (semiMajorAxis - marsAxis) / (jupiterAxis - marsAxis),
+    ),
+    sampleOrbit: (random) => {
+      // The main belt is concentrated between roughly 2.06 and 3.27 au. Reject
+      // particles near the strongest Kirkwood resonances so it reads as a
+      // structured population rather than a perfectly uniform decorative ring.
+      const semiMajorAxis = 2.06 + random() * 1.21;
+      const kirkwoodGapStrength = Math.max(
+        Math.exp(-Math.pow((semiMajorAxis - 2.50) / 0.018, 2)),
+        Math.exp(-Math.pow((semiMajorAxis - 2.82) / 0.022, 2)),
+        Math.exp(-Math.pow((semiMajorAxis - 2.96) / 0.018, 2)),
+      );
+      const radialDensity = 0.72
+        + 0.28 * Math.exp(-Math.pow((semiMajorAxis - 2.72) / 0.42, 2));
+      if (random() > radialDensity * (1 - kirkwoodGapStrength * 0.9)) return null;
+      const highInclination = random() < 0.08;
+      return {
+        semiMajorAxis,
+        eccentricity: THREE.MathUtils.clamp(
+          0.018 - Math.log(Math.max(1e-6, 1 - random())) * 0.065,
+          0.01,
+          0.27,
+        ),
+        inclination: rayleighInclination(random, highInclination ? 9 : 4.5, 24),
+      };
+    },
+    sampleColor: (random) => {
+      const brightness = 0.58 + random() * 0.34;
+      const warmth = random();
+      return [
+        brightness * THREE.MathUtils.lerp(0.84, 1, warmth),
+        brightness * THREE.MathUtils.lerp(0.82, 0.9, warmth),
+        brightness * THREE.MathUtils.lerp(0.78, 0.68, warmth),
+      ];
+    },
+  });
+}
+
+function createKuiperBelt(starTexture) {
+  const neptuneAxis = planetEphemerisElements.neptune.base[0];
+  return createSmallBodyBelt(starTexture, {
+    count: 3_600,
+    seed: 0x4b1f3a9d,
+    visualSize: 0.18,
+    physicalSize: 0.46,
+    visualOpacity: 0.64,
+    physicalOpacity: 0.76,
+    visualSemiMajorAxisFor: (semiMajorAxis) => THREE.MathUtils.lerp(
+      bodyMap.neptune.orbitRadius + 0.7,
+      bodyMap.neptune.orbitRadius + 9.2,
+      (semiMajorAxis - neptuneAxis) / (50 - neptuneAxis),
+    ),
+    sampleOrbit: (random) => {
+      const population = random();
+      if (population < 0.2) {
+        // Plutinos cluster around Neptune's 3:2 mean-motion resonance.
+        return {
+          semiMajorAxis: 39.15 + random() * 0.5,
+          eccentricity: 0.08 + random() * 0.17,
+          inclination: rayleighInclination(random, 9, 32),
+        };
+      }
+      if (population < 0.7) {
+        // The dynamically cold classical belt forms the thin 42–47 au core.
+        return {
+          semiMajorAxis: 42 + random() * 5.2,
+          eccentricity: 0.025 + random() * 0.09,
+          inclination: rayleighInclination(random, 2.2, 8),
+        };
+      }
+      if (population < 0.95) {
+        // The hot classical population is radially broader and more inclined.
+        return {
+          semiMajorAxis: 36 + random() * 12,
+          eccentricity: 0.06 + random() * 0.18,
+          inclination: rayleighInclination(random, 12, 38),
+        };
+      }
+      // A smaller concentration occupies Neptune's outer 2:1 resonance.
+      return {
+        semiMajorAxis: 47.45 + random() * 0.55,
+        eccentricity: 0.08 + random() * 0.16,
+        inclination: rayleighInclination(random, 8, 28),
+      };
+    },
+    sampleColor: (random) => {
+      const brightness = 0.46 + random() * 0.34;
+      const ice = random();
+      return [
+        brightness * THREE.MathUtils.lerp(0.72, 0.9, ice),
+        brightness * THREE.MathUtils.lerp(0.78, 0.91, ice),
+        brightness * THREE.MathUtils.lerp(0.82, 1, ice),
+      ];
+    },
+  });
+}
+
+function updateSmallBodyBelt(belt, date, physicalScale) {
+  const elapsedDays = (date.getTime() - J2000_MS) / DAY_MS;
+  const {
+    count,
+    positions,
+    semiMajorAxes,
+    visualSemiMajorAxes,
+    eccentricities,
+    inclinations,
+    nodes,
+    periapses,
+    meanAnomalies,
+    meanMotions,
+    visualSize,
+    physicalSize,
+    visualOpacity,
+    physicalOpacity,
+  } = belt.userData.orbits;
+
+  for (let index = 0; index < count; index += 1) {
+    const semiMajorAxis = semiMajorAxes[index];
+    const eccentricity = eccentricities[index];
+    const meanAnomaly = THREE.MathUtils.euclideanModulo(
+      meanAnomalies[index] + elapsedDays * meanMotions[index],
+      Math.PI * 2,
+    );
+    const eccentricAnomaly = solveEccentricAnomaly(meanAnomaly, eccentricity);
+    const orbitalX = semiMajorAxis * (Math.cos(eccentricAnomaly) - eccentricity);
+    const orbitalY = semiMajorAxis
+      * Math.sqrt(1 - eccentricity * eccentricity)
+      * Math.sin(eccentricAnomaly);
+    const periapsis = periapses[index];
+    const node = nodes[index];
+    const inclination = inclinations[index];
+    const cosA = Math.cos(periapsis); const sinA = Math.sin(periapsis);
+    const cosN = Math.cos(node); const sinN = Math.sin(node);
+    const cosI = Math.cos(inclination); const sinI = Math.sin(inclination);
+    const eclipticX = (cosA * cosN - sinA * sinN * cosI) * orbitalX
+      + (-sinA * cosN - cosA * sinN * cosI) * orbitalY;
+    const eclipticY = (cosA * sinN + sinA * cosN * cosI) * orbitalX
+      + (-sinA * sinN + cosA * cosN * cosI) * orbitalY;
+    const eclipticZ = sinA * sinI * orbitalX + cosA * sinI * orbitalY;
+    const sceneScale = physicalScale
+      ? PHYSICAL_AU_PER_UNIT
+      : visualSemiMajorAxes[index] / semiMajorAxis;
+    const positionIndex = index * 3;
+    positions[positionIndex] = eclipticX * sceneScale;
+    positions[positionIndex + 1] = eclipticZ * sceneScale;
+    positions[positionIndex + 2] = -eclipticY * sceneScale;
+  }
+  belt.geometry.attributes.position.needsUpdate = true;
+  belt.material.size = physicalScale ? physicalSize : visualSize;
+  belt.material.opacity = physicalScale ? physicalOpacity : visualOpacity;
 }
 
 function createGlowTexture() {
@@ -1062,150 +1404,72 @@ function createCatalogStarField(starTexture) {
   }));
 }
 
-function createMilkyWayBand(starTexture) {
-  // Galactic coordinates pass through the J2000 equatorial frame into the
-  // same J2000 ecliptic scene frame used by the planetary ephemerides.
-  const galacticToScene = (longitude, latitude, radius, target) => {
-    const cosLatitude = Math.cos(latitude);
-    const gx = radius * cosLatitude * Math.cos(longitude);
-    const gy = radius * cosLatitude * Math.sin(longitude);
-    const gz = radius * Math.sin(latitude);
-    const eqX = -0.0548755604 * gx + 0.4941094279 * gy - 0.8676661490 * gz;
-    const eqY = -0.8734370902 * gx - 0.4448296300 * gy - 0.1980763734 * gz;
-    const eqZ = -0.4838350155 * gx + 0.7469822445 * gy + 0.4559837762 * gz;
-    pushEquatorialToEclipticScene(eqX, eqY, eqZ, target);
-  };
-  let seed = 0x7f4a7c15;
-  const physicalCenterLongitude = THREE.MathUtils.degToRad(sagittariusAStar.galacticLongitudeDeg);
-  const physicalCenterLatitude = THREE.MathUtils.degToRad(sagittariusAStar.galacticLatitudeDeg);
-  const random = () => {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
-    return seed / 4294967296;
-  };
-  const positions = [];
-  const colors = [];
-  const glowColors = [];
-  for (let i = 0; i < 42_000; i += 1) {
-    const centerBiased = random() < 0.4;
-    const longitudeOffset = centerBiased
-      ? (random() - random()) * 0.82
-      : random() * Math.PI * 2 - Math.PI;
-    const longitude = physicalCenterLongitude + longitudeOffset;
-    const centerStrength = Math.exp(-Math.pow(longitudeOffset / 0.68, 2));
-    const innerBulge = Math.exp(-Math.pow(longitudeOffset / 0.27, 2));
-    const bandWidth = 0.035 + centerStrength * 0.135;
-    const latitudeCenter = centerStrength * physicalCenterLatitude
-      + centerStrength * 0.006 * Math.sin(longitudeOffset * 5.5 + 0.4);
-    const latitude = latitudeCenter + (random() - random()) * bandWidth;
-    const radius = 182 + random() * 34;
-    galacticToScene(longitude, latitude, radius, positions);
-
-    // From Earth the nuclear star cluster itself is hidden at visible
-    // wavelengths. The bright feature is the much broader Sagittarius bulge,
-    // crossed by an irregular, slightly warped foreground dust lane.
-    const dustLaneCenter = latitudeCenter
-      + 0.005 * Math.sin(longitudeOffset * 6.5 - 0.8)
-      + 0.003 * Math.sin(longitudeOffset * 17.0 + 1.7);
-    const dustLaneLatitude = latitude - dustLaneCenter;
-    const dustLaneWidth = 0.013 + centerStrength * 0.009;
-    const dustLane = 0.18
-      + 0.82 * (1 - Math.exp(-Math.pow(dustLaneLatitude / dustLaneWidth, 2)));
-    const pipeCloud = Math.exp(
-      -Math.pow((longitudeOffset + 0.29) / 0.16, 2)
-      -Math.pow((dustLaneLatitude + 0.018) / 0.035, 2),
-    );
-    const centralCloud = Math.exp(
-      -Math.pow((longitudeOffset - 0.07) / 0.11, 2)
-      -Math.pow((dustLaneLatitude - 0.006) / 0.027, 2),
-    );
-    const patchyExtinction = 1 - 0.5 * Math.max(pipeCloud, centralCloud);
-    const stellarCloud = THREE.MathUtils.clamp(
-      0.76
-        + 0.16 * Math.sin(longitudeOffset * 5.0 + 0.7)
-        + 0.11 * Math.sin(longitudeOffset * 17.0 - dustLaneLatitude * 90.0),
-      0.42,
-      1.02,
-    );
-    const nuclearObscuration = innerBulge
-      * Math.exp(-Math.pow(dustLaneLatitude / 0.032, 2));
-    const brightness = Math.max(
-      0.1,
-      (0.5 + centerStrength * 0.63 + innerBulge * 0.12)
-        * dustLane
-        * patchyExtinction
-        * stellarCloud
-        * (1 - nuclearObscuration * 0.34),
-    )
-      * (0.72 + random() * 0.34);
-    const dustProximity = Math.exp(-Math.pow(dustLaneLatitude / 0.032, 2));
-    const reddening = THREE.MathUtils.clamp(
-      dustProximity * (0.28 + centerStrength * 0.55),
-      0,
-      0.78,
-    );
-    const population = random();
-    let coreColor;
-    if (population < 0.1 * (1 - centerStrength * 0.45)) {
-      coreColor = [0.7, 0.83, 1];
-    } else if (population < 0.48 + centerStrength * 0.2) {
-      coreColor = [1, 0.79, 0.56];
-    } else {
-      coreColor = [1, 0.95, 0.84];
-    }
-    colors.push(
-      brightness * coreColor[0],
-      brightness * coreColor[1] * (1 - reddening * 0.14),
-      brightness * coreColor[2] * (1 - reddening * 0.42),
-    );
-
-    // Integrated Galactic light becomes warm tan/ochre where old stellar
-    // populations and dust reddening dominate. Keep this diffuse glow separate
-    // from the stellar cores so individual stars retain plausible colours.
-    const glowWarmth = THREE.MathUtils.clamp(
-      0.22 + centerStrength * 0.58 + dustProximity * 0.46,
-      0,
-      1,
-    );
-    const integratedLight = brightness * (0.78 + centerStrength * 0.68);
-    glowColors.push(
-      integratedLight * THREE.MathUtils.lerp(0.7, 0.9, glowWarmth),
-      integratedLight * THREE.MathUtils.lerp(0.82, 0.58, glowWarmth),
-      integratedLight * THREE.MathUtils.lerp(1.0, 0.3, glowWarmth),
-    );
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
-  const glowGeometry = new THREE.BufferGeometry();
-  glowGeometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  glowGeometry.setAttribute('color', new THREE.Float32BufferAttribute(glowColors, 3));
-  const material = new THREE.PointsMaterial({
-    map: starTexture,
-    size: 0.52,
-    vertexColors: true,
+function createMilkyWaySphere(renderer) {
+  const material = new THREE.MeshBasicMaterial({
+    side: THREE.BackSide,
     transparent: true,
-    opacity: 0.7,
+    opacity: 0,
     depthWrite: false,
-    alphaTest: 0.02,
-    blending: THREE.AdditiveBlending,
     toneMapped: false,
   });
-  const glowMaterial = new THREE.PointsMaterial({
-    map: starTexture,
-    size: 2.4,
-    vertexColors: true,
-    transparent: true,
-    opacity: 0.18,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    toneMapped: false,
-  });
-  const band = new THREE.Group();
-  band.userData.coreMaterial = material;
-  band.userData.glowMaterial = glowMaterial;
-  band.userData.visibilityScale = 1;
-  band.add(new THREE.Points(glowGeometry, glowMaterial), new THREE.Points(geometry, material));
-  return band;
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(225, 128, 64),
+    material,
+  );
+  sphere.renderOrder = -1000;
+
+  // The NASA texture is an ICRF/J2000 plate carrée map. Build an exact
+  // equatorial-to-scene basis so its Milky Way aligns with the J2000 catalogue
+  // stars already rendered in the ecliptic scene frame.
+  const basisValues = [];
+  pushEquatorialToEclipticScene(1, 0, 0, basisValues);
+  pushEquatorialToEclipticScene(0, 0, 1, basisValues);
+  pushEquatorialToEclipticScene(0, -1, 0, basisValues);
+  const equatorialToScene = new THREE.Matrix4().makeBasis(
+    new THREE.Vector3(...basisValues.slice(0, 3)),
+    new THREE.Vector3(...basisValues.slice(3, 6)),
+    new THREE.Vector3(...basisValues.slice(6, 9)),
+  );
+  sphere.quaternion.setFromRotationMatrix(equatorialToScene);
+
+  const textureResolution = '8k';
+  const texturePath = (resolution) => assetUrl(
+    `/textures/galaxy/sky/milkyway-nasa-2020-${resolution}.ktx2`,
+  );
+  const loader = new KTX2Loader()
+    .setTranscoderPath(assetUrl('/basis/'))
+    .detectSupport(renderer);
+
+  const applyTexture = (texture, resolution) => {
+    texture.colorSpace = THREE.SRGBColorSpace;
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    // NASA centers RA 0h and increases RA to the left. KTX2 textures are not
+    // upload-flipped, so mirror both axes to match the sphere's inward UVs.
+    texture.repeat.set(-1, -1);
+    texture.offset.set(1, 1);
+    texture.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+    material.map = texture;
+    material.needsUpdate = true;
+    sphere.userData.textureReady = true;
+    sphere.userData.textureResolution = resolution;
+    loader.dispose();
+  };
+  const loadTexture = (resolution) => {
+    loader.load(
+      texturePath(resolution),
+      (texture) => applyTexture(texture, resolution),
+      undefined,
+      () => loader.dispose(),
+    );
+  };
+
+  sphere.userData.material = material;
+  sphere.userData.textureReady = false;
+  sphere.userData.textureResolution = textureResolution;
+  sphere.userData.visibilityScale = 1;
+  loadTexture(textureResolution);
+  return sphere;
 }
 
 function createSunMaterial() {
@@ -1771,12 +2035,14 @@ function createPlanetMaterial(body) {
 }
 
 function getGalaxyCameraBias(camera, viewportWidth) {
-  if (viewportWidth > MOBILE_LAYOUT_MAX_WIDTH) return new THREE.Vector3(0, 94, 18);
   const verticalFov = THREE.MathUtils.degToRad(camera.fov);
   const horizontalFov = 2 * Math.atan(Math.tan(verticalFov / 2) * camera.aspect);
   const limitingFov = Math.min(verticalFov, horizontalFov);
   const halfMapSize = GALAXY_MAP_SIZE / 2;
-  const cameraDistance = halfMapSize / (Math.tan(limitingFov / 2) * GALAXY_MOBILE_FILL);
+  const viewportFill = viewportWidth > MOBILE_LAYOUT_MAX_WIDTH
+    ? GALAXY_DESKTOP_FILL
+    : GALAXY_MOBILE_FILL;
+  const cameraDistance = halfMapSize / (Math.tan(limitingFov / 2) * viewportFill);
   return new THREE.Vector3(0, 1, 18 / 94).normalize().multiplyScalar(cameraDistance);
 }
 
@@ -1858,16 +2124,101 @@ function buildSolarScene(mount, options) {
   scene.add(galaxy);
   const catalogStars = createCatalogStarField(starTexture);
   scene.add(catalogStars);
-  const milkyWay = createMilkyWayBand(starTexture);
+  const milkyWay = createMilkyWaySphere(renderer);
   scene.add(milkyWay);
   const galaxyMap = createGalaxyMap();
   scene.add(galaxyMap.group);
 
   const systemRoot = new THREE.Group();
   scene.add(systemRoot);
+  const asteroidBelt = createAsteroidBelt(starTexture);
+  updateSmallBodyBelt(asteroidBelt, START_DATE, false);
+  asteroidBelt.visible = false;
+  systemRoot.add(asteroidBelt);
+  const kuiperBelt = createKuiperBelt(starTexture);
+  updateSmallBodyBelt(kuiperBelt, START_DATE, false);
+  kuiperBelt.visible = false;
+  systemRoot.add(kuiperBelt);
+  const halleyOrbitLine = createHalleyOrbitLine();
+  halleyOrbitLine.visible = false;
+  systemRoot.add(halleyOrbitLine);
   const helicalTrailGroup = new THREE.Group();
   scene.add(helicalTrailGroup);
   const trailGlowTexture = createGlowTexture();
+  const halleyGroup = new THREE.Group();
+  const halleyNucleus = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.22, 2),
+    new THREE.MeshStandardMaterial({
+      color: '#292a28',
+      roughness: 0.98,
+      metalness: 0,
+      emissive: '#37434a',
+      emissiveIntensity: 0.16,
+    }),
+  );
+  halleyNucleus.scale.set(1.7, 0.82, 0.72);
+  halleyGroup.add(halleyNucleus);
+  const halleyComa = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: trailGlowTexture,
+    color: '#d7f5ff',
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  }));
+  halleyComa.scale.setScalar(1.8);
+  halleyGroup.add(halleyComa);
+  const halleyLocator = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: trailGlowTexture,
+    color: '#9de9ff',
+    transparent: true,
+    opacity: 0.62,
+    depthWrite: false,
+    depthTest: false,
+    blending: THREE.AdditiveBlending,
+  }));
+  halleyLocator.scale.setScalar(0.86);
+  halleyLocator.renderOrder = 20;
+  halleyGroup.add(halleyLocator);
+  const halleyLabel = createLabelSprite({
+    name: '1P/Halley',
+    zh: '哈雷彗星',
+    type: 'comet',
+    scaleRadius: 0.22,
+  });
+  halleyLabel.scale.multiplyScalar(1.05);
+  halleyLabel.material.depthTest = false;
+  halleyLabel.renderOrder = 22;
+  halleyGroup.add(halleyLabel);
+  const halleyDustTail = createCometTailLine('#ffe0a3');
+  const halleyIonTail = createCometTailLine('#8be8ff');
+  const halleyDustCone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.34, 1, 24, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: '#ffd79a',
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    }),
+  );
+  const halleyIonCone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.13, 1, 18, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: '#78e6ff',
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    }),
+  );
+  halleyGroup.add(halleyDustCone, halleyIonCone, halleyDustTail, halleyIonTail);
+  halleyGroup.visible = false;
+  systemRoot.add(halleyGroup);
   const sunMotionLine = createSunMotionLine(trailGlowTexture);
   scene.add(sunMotionLine.group);
 
@@ -1878,6 +2229,7 @@ function buildSolarScene(mount, options) {
   const orbitLines = [];
   const trailNodes = new Map();
   const sunBody = bodyMap.sun;
+  worldPositions.set('halley', new THREE.Vector3());
 
   for (const id of trailBodyIds) {
     const trail = createHelicalTrail(
@@ -2087,6 +2439,12 @@ function buildSolarScene(mount, options) {
   const pointerStart = new THREE.Vector2();
   const trailPoint = new THREE.Vector3();
   const trailOrbitNormal = new THREE.Vector3();
+  const halleyNextPosition = new THREE.Vector3();
+  const halleyAntiSolar = new THREE.Vector3();
+  const halleyVelocity = new THREE.Vector3();
+  const halleyDustDirection = new THREE.Vector3();
+  const halleyTailRotationAxis = new THREE.Vector3(0, 1, 0);
+  const halleyTailReverseDirection = new THREE.Vector3();
   const physicalRadiusFor = (body) => body.radiusKm / PHYSICAL_KM_PER_UNIT;
   const physicalOrbitFor = (body) => body.distanceKm / PHYSICAL_KM_PER_UNIT;
 
@@ -2173,7 +2531,7 @@ function buildSolarScene(mount, options) {
     const sunPosition = worldPositions.get('sun') ?? targetPosition;
 
     for (const [id, trail] of trailNodes) {
-      const body = bodyMap[id];
+      const body = id === 'halley' ? HALLEY_BODY : bodyMap[id];
       const selectedTrail = id === selectedTrailId;
       const hideSelectedCloseUpTrail = mode === 'follow' && id === selectedTrailId;
       if (hideSelectedCloseUpTrail) {
@@ -2240,6 +2598,14 @@ function buildSolarScene(mount, options) {
     const forward = simDays * 0.18;
     const simulationDate = new Date(START_DATE.getTime() + simDays * DAY_MS);
     const rushingMode = state.viewMode === 'helical' || state.viewMode === 'follow';
+    const smallBodyBeltsVisible = state.viewMode === 'orbit' && state.orbitScope === 'solar';
+    asteroidBelt.visible = smallBodyBeltsVisible;
+    kuiperBelt.visible = smallBodyBeltsVisible;
+    if (smallBodyBeltsVisible) {
+      const physicalScale = state.scaleMode === 'physical';
+      updateSmallBodyBelt(asteroidBelt, simulationDate, physicalScale);
+      updateSmallBodyBelt(kuiperBelt, simulationDate, physicalScale);
+    }
     systemRoot.rotation.x = THREE.MathUtils.lerp(systemRoot.rotation.x, 0, 1 - Math.pow(0.001, delta));
     systemRoot.position.copy(GALACTIC_TRAVEL_DIRECTION).multiplyScalar(forward);
     if (!rushingMode) systemRoot.position.y += Math.sin(simDays * 0.25) * 0.08;
@@ -2316,6 +2682,66 @@ function buildSolarScene(mount, options) {
         }
       }
     }
+    const physicalScale = state.scaleMode === 'physical';
+    const halleySceneSemiMajorAxis = physicalScale
+      ? HALLEY_SEMI_MAJOR_AXIS_AU * PHYSICAL_AU_PER_UNIT
+      : HALLEY_VISUAL_SEMI_MAJOR_AXIS;
+    setHalleyScenePosition(simulationDate, halleySceneSemiMajorAxis, halleyGroup.position);
+    setHalleyScenePosition(
+      new Date(simulationDate.getTime() + DAY_MS),
+      halleySceneSemiMajorAxis,
+      halleyNextPosition,
+    );
+    const halleySceneScale = halleySceneSemiMajorAxis / HALLEY_SEMI_MAJOR_AXIS_AU;
+    const halleyDistanceAu = halleyGroup.position.length() / halleySceneScale;
+    const halleyActivity = 1 - THREE.MathUtils.smoothstep(halleyDistanceAu, 1.2, 5);
+    const halleyVisible = (state.viewMode === 'orbit' && state.orbitScope === 'solar')
+      || state.viewMode === 'helical';
+    halleyGroup.visible = halleyVisible;
+    halleyOrbitLine.visible = state.viewMode === 'orbit' && state.orbitScope === 'solar';
+    halleyOrbitLine.scale.setScalar(
+      physicalScale
+        ? (HALLEY_SEMI_MAJOR_AXIS_AU * PHYSICAL_AU_PER_UNIT) / HALLEY_VISUAL_SEMI_MAJOR_AXIS
+        : 1,
+    );
+    halleyNucleus.scale.set(1.7, 0.82, 0.72).multiplyScalar(
+      physicalScale ? (5.5 / PHYSICAL_KM_PER_UNIT) / 0.22 : 1,
+    );
+    halleyLabel.material.opacity = halleyVisible ? 0.8 : 0;
+    halleyLocator.material.opacity = halleyVisible ? 0.62 : 0;
+    halleyComa.material.opacity = halleyActivity * 0.66;
+    halleyComa.scale.setScalar((physicalScale ? 1.1 : 1.8) * (0.72 + halleyActivity * 0.72));
+    halleyAntiSolar.copy(halleyGroup.position).normalize();
+    halleyVelocity.copy(halleyNextPosition).sub(halleyGroup.position).normalize();
+    halleyDustDirection.copy(halleyAntiSolar).addScaledVector(halleyVelocity, -0.28).normalize();
+    const tailLength = halleyActivity * (physicalScale ? 2.2 : 4.8);
+    const dustPositions = halleyDustTail.geometry.attributes.position.array;
+    dustPositions[3] = halleyDustDirection.x * tailLength;
+    dustPositions[4] = halleyDustDirection.y * tailLength;
+    dustPositions[5] = halleyDustDirection.z * tailLength;
+    halleyDustTail.geometry.attributes.position.needsUpdate = true;
+    const ionPositions = halleyIonTail.geometry.attributes.position.array;
+    ionPositions[3] = halleyAntiSolar.x * tailLength * 1.28;
+    ionPositions[4] = halleyAntiSolar.y * tailLength * 1.28;
+    ionPositions[5] = halleyAntiSolar.z * tailLength * 1.28;
+    halleyIonTail.geometry.attributes.position.needsUpdate = true;
+    halleyDustTail.material.opacity = halleyActivity * 0.58;
+    halleyIonTail.material.opacity = halleyActivity * 0.72;
+    halleyDustCone.position.copy(halleyDustDirection).multiplyScalar(tailLength * 0.5);
+    halleyDustCone.quaternion.setFromUnitVectors(
+      halleyTailRotationAxis,
+      halleyTailReverseDirection.copy(halleyDustDirection).negate(),
+    );
+    halleyDustCone.scale.set(1, tailLength, 1);
+    halleyDustCone.material.opacity = halleyActivity * 0.2;
+    halleyIonCone.position.copy(halleyAntiSolar).multiplyScalar(tailLength * 0.64);
+    halleyIonCone.quaternion.setFromUnitVectors(
+      halleyTailRotationAxis,
+      halleyTailReverseDirection.copy(halleyAntiSolar).negate(),
+    );
+    halleyIonCone.scale.set(0.72, tailLength * 1.28, 0.72);
+    halleyIonCone.material.opacity = halleyActivity * 0.26;
+    halleyGroup.getWorldPosition(worldPositions.get('halley'));
     for (const item of orbitLines) {
       const orbitBody = bodyMap[item.id];
       const ratio = state.scaleMode === 'physical'
@@ -2397,7 +2823,7 @@ function buildSolarScene(mount, options) {
       cameraBias = state.scaleMode === 'physical'
         ? PHYSICAL_ORBIT_CAMERA_BIAS
         : selectedBody.type === 'star'
-          ? new THREE.Vector3(0, 42, 38)
+          ? new THREE.Vector3(0, 82, 76)
           : selectedBody.type === 'planet'
             ? new THREE.Vector3(8, 5.2, 9.5)
             : new THREE.Vector3(3.8, 2.4, 4.6);
@@ -2418,7 +2844,11 @@ function buildSolarScene(mount, options) {
         : new THREE.Vector3(selectedSceneRadius * 7 + 7, selectedSceneRadius * 2.2 + 2.4, selectedSceneRadius * 4.4 + 7);
     }
     controls.minDistance = galaxyView ? cameraBias.length() * 0.56 : selectedSceneRadius * (selectedBody.type === 'star' ? 1.68 : 1.18);
-    controls.maxDistance = galaxyView ? Math.max(310, cameraBias.length() * 1.8) : 240;
+    controls.maxDistance = galaxyView
+      ? Math.max(310, cameraBias.length() * 1.8)
+      : state.scaleMode === 'physical' && state.viewMode === 'orbit'
+        ? 440
+        : 240;
     controls.minPolarAngle = galaxyView ? 0.08 : 0;
     controls.maxPolarAngle = galaxyView ? 0.52 : Math.PI;
     if (state.viewMode === 'follow' && selectedBody.type !== 'star') {
@@ -2537,8 +2967,13 @@ function buildSolarScene(mount, options) {
       targetVisibilityScale,
       1 - Math.pow(0.015, delta),
     );
-    milkyWay.userData.coreMaterial.opacity = 0.7 * milkyWay.userData.visibilityScale;
-    milkyWay.userData.glowMaterial.opacity = 0.18 * milkyWay.userData.visibilityScale;
+    // NASA's HDR sky map preserves faint integrated light for visualization;
+    // render it as low-surface-brightness sky rather than a photographic
+    // exposure. Changing sphere radius would not alter angular size from its
+    // center and compressing latitude would corrupt the J2000 sky geometry.
+    milkyWay.userData.material.opacity = milkyWay.userData.textureReady
+      ? Math.min(0.28 * milkyWay.userData.visibilityScale, 0.34)
+      : 0;
     cameraLight.position.copy(camera.position);
     renderer.render(scene, camera);
 
@@ -3472,7 +3907,7 @@ function App() {
               </>
             )}
             <div><span>{copy.scaleModel}</span><strong>{scaleMode === 'physical' ? 'Unified physical ratio' : 'Compressed visual scale'}</strong></div>
-            <div><span>{copy.catalogue}</span><strong>Procedural Milky Way + Hipparcos bright subset / J2000</strong></div>
+            <div><span>{copy.catalogue}</span><strong>NASA SVS Milky Way + Hipparcos bright subset / J2000</strong></div>
             <div><span>{copy.lighting}</span><strong>Geometric eclipse + ring shadows</strong></div>
           </div>
         )}
