@@ -22,6 +22,7 @@ const moonSourcePaths = {
 
 const facts = {
   sun: ['The star that contains about 99.8% of the solar system’s mass.', '包含太阳系约 99.8% 质量的恒星。'],
+  halley: ['The best-known periodic comet, observed for more than 2,000 years. It last reached perihelion in 1986 and will return in 2061.', '最著名的周期彗星之一，人类对它的观测记录已延续 2,000 多年；上一次通过近日点是在 1986 年，下一次将在 2061 年。'],
   mercury: ['The smallest planet and the closest planet to the Sun.', '太阳系最小、距离太阳最近的行星。'],
   venus: ['A rocky world with a dense carbon-dioxide atmosphere and the hottest planetary surface.', '拥有浓厚二氧化碳大气，表面温度为八大行星之最。'],
   earth: ['The only world currently known to support life and stable surface oceans.', '目前唯一确认存在生命和稳定地表海洋的天体。'],
@@ -52,7 +53,9 @@ const gas = new Set(['jupiter', 'saturn']);
 const iceGiants = new Set(['uranus', 'neptune']);
 
 export function getBodyDetails(body) {
-  const composition = body.id === 'sun'
+  const composition = body.id === 'halley'
+    ? ['A porous nucleus of water ice, dust and carbon-rich organic material', '由水冰、尘埃和富碳有机物构成的多孔彗核']
+    : body.id === 'sun'
     ? ['Hydrogen and helium plasma', '氢、氦等离子体']
     : gas.has(body.id)
       ? ['Mostly hydrogen and helium; no solid surface', '主要由氢和氦构成，没有固体表面']
@@ -65,6 +68,7 @@ export function getBodyDetails(body) {
             : ['Rock, ice and trace volatile compounds', '岩石、冰与少量挥发性物质'];
   const atmospheres = {
     sun: ['Solar atmosphere: photosphere, chromosphere and corona', '太阳大气：光球层、色球层与日冕'],
+    halley: ['No permanent atmosphere; solar heating drives a temporary coma and dust and ion tails near the Sun', '没有永久大气；接近太阳时受热升华，形成临时彗发、尘埃尾和离子尾'],
     mercury: ['Extremely tenuous exosphere; no substantial atmosphere', '仅有极稀薄外逸层，无实质性大气'],
     venus: ['Mostly carbon dioxide, with nitrogen and sulfuric-acid clouds', '以二氧化碳为主，含氮并覆盖硫酸云'],
     earth: ['About 78% nitrogen, 21% oxygen, plus argon and trace gases', '约 78% 氮、21% 氧，另含氩及微量气体'],
@@ -82,6 +86,8 @@ export function getBodyDetails(body) {
     : ['No verified atmosphere data in this compact catalogue', '本精简目录暂无经核实的大气数据']);
   const source = body.id === 'sun'
     ? `${nasaBase}/sun/facts/`
+    : body.id === 'halley'
+      ? `${nasaBase}/solar-system/comets/1p-halley/`
     : planetSources[body.id] ?? `${nasaBase}/${moonSourcePaths[body.id] ?? 'solar-system/moons/facts'}/`;
   return { overview: facts[body.id], composition, atmosphere, source };
 }

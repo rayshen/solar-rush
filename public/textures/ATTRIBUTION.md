@@ -32,6 +32,14 @@ was processed by Bjorn Jonsson.
 - Source: https://www.planetary.org/space-images/color-global-map-of-europa
 - Image data: NASA/JPL/PDS
 
+## ESA / Giotto
+
+The `bodies/halley.jpg` preview is a composite image of comet 1P/Halley's
+nucleus assembled from observations made by ESA's Giotto spacecraft in 1986.
+
+- Source: https://www.esa.int/ESA_Multimedia/Images/2002/01/A_composite_image_of_the_nucleus_of_comet_P_Halley
+- Credits: ESA/MPAE
+
 ## ESA / Gaia / DPAC
 
 The face-on Milky Way reconstruction in `galaxy/` is a data-informed artist's
