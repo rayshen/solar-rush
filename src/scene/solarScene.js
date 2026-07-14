@@ -417,8 +417,9 @@ function buildSolarScene(mount, options) {
       const baseOpacity = selectedTrail ? 0.9 : mode === 'follow' ? 0.12 : selectedTrailId ? 0.42 : 0.52;
       trail.group.visible = true;
       trail.material.opacity = baseOpacity;
-      trail.glowMaterial.opacity = baseOpacity * (selectedTrail ? 0.52 : 0.38);
-      trail.outerGlowMaterial.opacity = baseOpacity * (selectedTrail ? 0.2 : 0.11);
+      const continuousCometTrail = id === 'halley';
+      trail.glowMaterial.opacity = continuousCometTrail ? 0 : baseOpacity * (selectedTrail ? 0.52 : 0.38);
+      trail.outerGlowMaterial.opacity = continuousCometTrail ? 0 : baseOpacity * (selectedTrail ? 0.2 : 0.11);
       trail.glowMaterial.size = selectedTrail ? 0.4 : 0.31;
       trail.outerGlowMaterial.size = selectedTrail ? 0.96 : 0.8;
       const currentPosition = worldPositions.get(id) ?? targetPosition;

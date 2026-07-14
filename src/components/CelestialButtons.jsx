@@ -22,8 +22,6 @@ function BodyButton({ body, selectedId, onSelect, language, nested = false }) {
           ? (language === 'zh' ? parent?.zh : parent?.name)
           : body.type === 'star'
             ? (language === 'zh' ? '中心' : 'center')
-            : body.type === 'comet'
-              ? (language === 'zh' ? '76.1 年' : '76.1 yr')
             : formatDistance(body.distanceKm)}
       </em>
     </button>
